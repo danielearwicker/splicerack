@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>vAIdeo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>vAIdeo</h1>
+    </header>
+
+    <!-- Tab bar -->
+    <div class="tab-bar">
+      <button class="tab active" data-tab="library-tab">Library</button>
+      <button class="tab" data-tab="timeline-tab">Timeline</button>
+      <button class="tab" data-tab="outputs-tab">Outputs</button>
+    </div>
+
+    <!-- Library tab -->
+    <div id="library-tab" class="tab-content active">
+      <div class="main-layout">
+        <!-- Library panel -->
+        <div class="panel library-panel">
+          <div class="panel-header">
+            <h2>Library</h2>
+          </div>
+          <div id="drop-zone" class="drop-zone">
+            <p>Drop video files here or <label class="file-label">browse<input type="file" id="file-input" multiple accept="video/*" hidden></label></p>
+          </div>
+          <ul id="library-list" class="library-list"></ul>
+        </div>
+
+        <!-- Viewer / clip editor -->
+        <div class="panel viewer-panel">
+          <div class="panel-header">
+            <h2 id="viewer-title">Select a video</h2>
+          </div>
+          <div class="video-container">
+            <video id="video-player" controls preload="metadata"></video>
+          </div>
+          <div id="clip-controls" class="clip-controls" style="display:none">
+            <div class="scrubber-row">
+              <span id="current-time">0:00.000</span>
+              <input type="range" id="scrubber" min="0" max="1000" value="0" step="1">
+              <span id="duration">0:00.000</span>
+            </div>
+            <div class="clip-mark-row">
+              <button id="btn-mark-in">Set In</button>
+              <span id="mark-in-display">--:--</span>
+              <span class="clip-arrow">-></span>
+              <span id="mark-out-display">--:--</span>
+              <button id="btn-mark-out">Set Out</button>
+              <input type="text" id="clip-name-input" placeholder="Clip name...">
+              <button id="btn-save-clip">Save Clip</button>
+            </div>
+          </div>
+          <!-- Clips list for current video -->
+          <div id="clips-section" style="display:none">
+            <h3>Clips</h3>
+            <ul id="clips-list" class="clips-list"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timeline tab -->
+    <div id="timeline-tab" class="tab-content">
+      <div class="timeline-layout">
+        <!-- Project selector and YAML editor -->
+        <div class="panel timeline-sidebar">
+          <div class="panel-header">
+            <h2>Project</h2>
+          </div>
+          <div class="project-controls">
+            <select id="project-select">
+              <option value="">-- Select project --</option>
+            </select>
+            <button id="btn-new-project">New</button>
+          </div>
+          <div class="yaml-editor-wrap">
+            <textarea id="yaml-editor" spellcheck="false" placeholder="# YAML orchestration will appear here..."></textarea>
+          </div>
+          <div class="yaml-actions">
+            <button id="btn-save-yaml">Save</button>
+            <button id="btn-render" class="render-btn">Render</button>
+          </div>
+        </div>
+
+        <!-- Visual timeline -->
+        <div class="panel timeline-main">
+          <div class="panel-header">
+            <h2>Timeline</h2>
+            <div class="timeline-toolbar">
+              <button id="btn-add-caption">+ Caption</button>
+              <button id="btn-add-clip">+ Clip</button>
+              <button id="btn-add-pause">+ Pause</button>
+              <button id="btn-add-image">+ Image</button>
+            </div>
+          </div>
+          <div id="timeline-track" class="timeline-track">
+            <div class="timeline-empty">Open or create a project to start</div>
+          </div>
+          <!-- Render status -->
+          <div id="render-status" class="render-status" style="display:none">
+            <div class="render-progress-bar">
+              <div id="render-progress-fill" class="render-progress-fill"></div>
+            </div>
+            <span id="render-status-text">Rendering...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Outputs tab -->
+    <div id="outputs-tab" class="tab-content">
+      <div class="main-layout">
+        <div class="panel library-panel">
+          <div class="panel-header">
+            <h2>Outputs</h2>
+          </div>
+          <ul id="outputs-list" class="library-list"></ul>
+        </div>
+        <div class="panel viewer-panel">
+          <div class="panel-header">
+            <h2 id="output-viewer-title">Select an output</h2>
+          </div>
+          <div class="video-container">
+            <video id="output-player" controls preload="metadata"></video>
+          </div>
+          <div id="output-info" class="output-info" style="display:none">
+            <span id="output-file-size"></span>
+            <button id="btn-delete-output" class="delete-output-btn">Delete this output</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

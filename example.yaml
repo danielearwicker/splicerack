@@ -1,0 +1,68 @@
+output:
+  width: 1920
+  height: 1080
+  fps: 30
+  background: "#1a1a2e"
+
+timeline:
+  - type: caption
+    text: "Welcome to the Demo"
+    duration: 3
+    style:
+      font-size: 64
+      color: "#ffffff"
+      background: "#1a1a2e"
+      align: "center"
+      valign: "middle"
+    fade-in: 0.5
+    fade-out: 0.5
+
+  - type: image
+    source: architecture-diagram.png
+    duration: 5
+    animation:
+      type: pan
+      from: { x: 0, y: 0, scale: 1 }
+      to: { x: 100, y: 0, scale: 1.2 }
+    fade-in: 0.5
+    fade-out: 0.5
+
+  - type: clip
+    source: screen-recording.mp4
+    clip: intro-walkthrough
+    fade-in: 0.3
+    fade-out: 0.3
+
+  - type: clip
+    source: screen-recording.mp4
+    clip: setup-step
+    overlay:
+      - type: caption
+        text: "Step 1: Install dependencies"
+        style:
+          font-size: 36
+          color: "#ffffff"
+          background: "rgba(0,0,0,0.6)"
+          padding: 12
+          align: "center"
+          valign: "bottom"
+
+  - type: clip
+    source: screen-recording.mp4
+    clip: demo-feature
+
+  - type: pause
+    duration: 1.5
+    background: "#1a1a2e"
+
+  - type: caption
+    text: "Thanks for watching!"
+    duration: 3
+    style:
+      font-size: 48
+      color: "#e94560"
+      background: "#1a1a2e"
+      align: "center"
+      valign: "middle"
+    fade-in: 0.5
+    fade-out: 0.5
