@@ -796,3 +796,79 @@ header h1 {
 .delete-output-btn:hover {
   background: #c73850;
 }
+
+/* Logs tab */
+.logs-panel {
+  flex: 1;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 100px);
+}
+
+.logs-panel .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.clear-logs-btn {
+  background: #0f3460;
+  color: #a0a0b0;
+  border: 1px solid #1a5276;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.clear-logs-btn:hover {
+  background: #1a5276;
+  color: #fff;
+}
+
+.logs-progress {
+  margin: 8px 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logs-progress .render-progress-bar {
+  flex: 1;
+}
+
+.logs-progress span {
+  font-size: 11px;
+  color: #a0a0b0;
+  white-space: nowrap;
+}
+
+.logs-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-family: "Consolas", "Monaco", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #0a0a1a;
+  border-radius: 4px;
+  margin: 8px;
+}
+
+.log-entry {
+  padding: 2px 0;
+  border-bottom: 1px solid #111128;
+}
+
+.log-entry .log-time {
+  color: #555570;
+  margin-right: 8px;
+  font-size: 11px;
+}
+
+.log-entry.log-info { color: #8ab4f8; }
+.log-entry.log-progress { color: #a0a0b0; }
+.log-entry.log-success { color: #81c995; }
+.log-entry.log-warning { color: #f0c674; }
+.log-entry.log-error { color: #e94560; }

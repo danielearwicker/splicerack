@@ -13,6 +13,7 @@ import { copyFileSync } from "fs";
 import yaml from "js-yaml";
 import { loadTypes } from "./types/index.js";
 import { buildFadeFilter } from "./types/_helpers.js";
+import { getVoices, synthesize } from "./services/tts.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -89,7 +90,12 @@ app.get("/api/library", async (req, res) => {
     const files = readdirSync(LIBRARY_DIR)
       .filter((f) => {
         const ext = extname(f).toLowerCase();
-        return [".mp4", ".mov", ".avi", ".mkv", ".webm"].includes(ext);
+        const videoExts = [".mp4", ".mov", ".avi", ".mkv", ".webm"];
+        const audioExts = [".mp3", ".wav", ".aac", ".ogg", ".flac", ".m4a"];
+        const typeFilter = req.query.type;
+        if (typeFilter === "audio") return audioExts.includes(ext);
+        if (typeFilter === "video") return videoExts.includes(ext);
+        return [...videoExts, ...audioExts].includes(ext);
       })
       .map((f) => {
         const filePath = join(LIBRARY_DIR, f);
@@ -201,7 +207,9 @@ if (!existsSync(CACHE_DIR)) {
 // Content-addressable render cache: hash segment settings → cached .mp4
 // Use a replacer function that sorts keys at every nesting level for deterministic output.
 function segmentHash(seg) {
+  // Exclude 'audio' from the hash — audio is mixed globally, not per-segment.
   const json = JSON.stringify(seg, (key, value) => {
+    if (key === "audio") return undefined;
     if (value && typeof value === "object" && !Array.isArray(value)) {
       const sorted = {};
       for (const k of Object.keys(value).sort()) sorted[k] = value[k];
@@ -215,6 +223,48 @@ function segmentHash(seg) {
 function getCachePath(hash) {
   return join(CACHE_DIR, `${hash}.mp4`);
 }
+
+// --- Audio mixer ---
+// Resolve a single audio layer to a file path, generating if needed.
+async function resolveAudioLayer(layer, seg, ctx) {
+  if (layer.mute) return null;
+
+  if (layer.type === "source") {
+    // Extract native audio from the clip's source video
+    if (seg.type !== "clip" || !seg.source) return null;
+    const sourcePath = join(ctx.LIBRARY_DIR, seg.source);
+    if (!existsSync(sourcePath)) return null;
+    const { start, end } = ctx.resolveClip(seg);
+    const audioFile = join(ctx.OUTPUT_DIR, `_audio_source_${Date.now()}.wav`);
+    const vol = layer.volume != null ? layer.volume : 1;
+    await ctx.execFileAsync("ffmpeg", [
+      "-y", "-ss", String(start), "-to", String(end),
+      "-i", sourcePath,
+      "-vn", "-af", `volume=${vol}`,
+      "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+      audioFile,
+    ], { maxBuffer: 50 * 1024 * 1024 });
+    return { path: audioFile, delay: layer.delay || 0, temp: true };
+
+  } else if (layer.type === "tts") {
+    const { path } = await synthesize({
+      text: layer.text,
+      voice: layer.voice,
+      rate: layer.rate,
+      pitch: layer.pitch,
+    });
+    return { path, delay: layer.delay || 0, volume: layer.volume, temp: false };
+
+  } else if (layer.type === "file") {
+    const filePath = join(ctx.LIBRARY_DIR, layer.source);
+    if (!existsSync(filePath)) throw new Error(`Audio file not found: ${layer.source}`);
+    return { path: filePath, delay: layer.delay || 0, volume: layer.volume, loop: layer.loop, temp: false };
+  }
+
+  return null;
+}
+
+
 
 // Render a segment, using cache if available. Returns the output file path.
 async function renderCached(seg, outFile, ctx) {
@@ -231,8 +281,13 @@ async function renderCached(seg, outFile, ctx) {
 
   await renderer.render(seg, outFile, ctx);
 
+  // Video-only output — audio is mixed globally after concat.
+
   // Cache the result
-  try { copyFileSync(outFile, cached); } catch {}
+  try {
+    if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
+    copyFileSync(outFile, cached);
+  } catch {}
   return { hit: false };
 }
 
@@ -406,7 +461,7 @@ app.post("/api/render/:filename", async (req, res) => {
     width, height, fps, defaultBg: bg, defaultFont,
     buildFadeFilter, resolveClip, readClips, writeFilterScript,
     LIBRARY_DIR, execFileAsync, existsSync, join,
-    rendererRegistry, OUTPUT_DIR, renderCached,
+    rendererRegistry, OUTPUT_DIR, renderCached, broadcast,
   };
 
   broadcast({ type: "render-started", filename: req.params.filename });
@@ -446,20 +501,179 @@ app.post("/api/render/:filename", async (req, res) => {
       return;
     }
 
-    // Concatenate all segments
+    // --- Concatenate video (video-only, fast copy) ---
+    broadcast({ type: "render-phase", phase: "Concatenating video..." });
     const concatList = join(OUTPUT_DIR, "_concat.txt");
     const concatContent = tempFiles.map((f) => `file '${f}'`).join("\n");
     writeFileSync(concatList, concatContent);
 
+    const concatTmp = join(OUTPUT_DIR, "_concat_tmp.mp4");
     await execFileAsync("ffmpeg", [
       "-y",
-      "-f", "concat",
-      "-safe", "0",
+      "-f", "concat", "-safe", "0",
       "-i", concatList,
       "-c", "copy",
       "-movflags", "+faststart",
-      outputFile,
+      concatTmp,
     ], { maxBuffer: 50 * 1024 * 1024 });
+
+    // --- Global audio mix ---
+    broadcast({ type: "render-phase", phase: "Mixing audio..." });
+    // Probe each segment's duration to compute absolute start times.
+    const segDurations = [];
+    for (const f of tempFiles) {
+      try {
+        const { stdout } = await execFileAsync("ffprobe", [
+          "-v", "quiet", "-print_format", "json", "-show_format", f,
+        ]);
+        segDurations.push(parseFloat(JSON.parse(stdout).format.duration) || 0);
+      } catch { segDurations.push(0); }
+    }
+    const segStartTimes = [];
+    let cumTime = 0;
+    for (const d of segDurations) {
+      segStartTimes.push(cumTime);
+      cumTime += d;
+    }
+    const totalDuration = cumTime;
+
+    // Collect all audio layers with absolute positioning.
+    const audioItems = []; // { path, absoluteStart, volume, loop, temp }
+    const audioTemplates = project["audio-templates"] || {};
+    const audioErrors = [];
+
+    for (let i = 0; i < timeline.length; i++) {
+      const seg = timeline[i];
+      if (!seg.audio || seg.audio.length === 0) continue;
+
+      for (const rawLayer of seg.audio) {
+        // Resolve audio template
+        let layer = rawLayer;
+        if (rawLayer.template) {
+          const tmpl = audioTemplates[rawLayer.template];
+          if (tmpl) {
+            layer = { ...tmpl };
+            for (const [k, v] of Object.entries(rawLayer)) {
+              if (k !== "template" && v !== undefined) layer[k] = v;
+            }
+          }
+        }
+
+        if (layer.mute) continue;
+        const delay = layer.delay || 0; // can be negative
+        const absStart = Math.max(0, segStartTimes[i] + delay);
+
+        try {
+          const resolved = await resolveAudioLayer(layer, seg, ctx);
+          if (resolved) {
+            audioItems.push({
+              path: resolved.path,
+              absoluteStart: absStart,
+              volume: layer.volume != null ? layer.volume : 1,
+              loop: resolved.loop || false,
+              temp: resolved.temp || false,
+            });
+          }
+        } catch (err) {
+          audioErrors.push(err.message);
+        }
+      }
+    }
+
+    // Project-level background audio
+    const bgAudio = outputSettings["background-audio"] || [];
+    for (const layer of bgAudio) {
+      try {
+        let audioPath = null;
+        if (layer.type === "file" && layer.source) {
+          audioPath = join(LIBRARY_DIR, layer.source);
+        } else if (layer.type === "tts" && layer.text && layer.voice) {
+          const { path } = await synthesize({ text: layer.text, voice: layer.voice, rate: layer.rate, pitch: layer.pitch });
+          audioPath = path;
+        }
+        if (audioPath && existsSync(audioPath)) {
+          audioItems.push({
+            path: audioPath,
+            absoluteStart: 0,
+            volume: layer.volume != null ? layer.volume : 1,
+            loop: layer.loop || false,
+            temp: false,
+          });
+        }
+      } catch (err) {
+        audioErrors.push(err.message);
+      }
+    }
+
+    if (audioErrors.length > 0) {
+      broadcast({ type: "audio-warning", errors: audioErrors });
+    }
+
+    // Build the final output: merge concatenated video with global audio mix.
+    if (audioItems.length > 0) {
+      const mixInputs = ["-i", concatTmp];
+      const mixFilters = [];
+
+      for (let ai = 0; ai < audioItems.length; ai++) {
+        const item = audioItems[ai];
+        if (item.loop) {
+          mixInputs.push("-stream_loop", "-1", "-i", item.path);
+        } else {
+          mixInputs.push("-i", item.path);
+        }
+
+        const inputIdx = ai + 1; // 0 is the video
+        const filters = [];
+        // Convert absolute start to adelay in ms
+        const delayMs = Math.round(item.absoluteStart * 1000);
+        if (delayMs > 0) {
+          filters.push(`adelay=${delayMs}|${delayMs}`);
+        }
+        if (item.volume !== 1) {
+          filters.push(`volume=${item.volume}`);
+        }
+        if (filters.length > 0) {
+          mixFilters.push(`[${inputIdx}:a]${filters.join(",")}[a${ai}]`);
+        } else {
+          mixFilters.push(`[${inputIdx}:a]anull[a${ai}]`);
+        }
+      }
+
+      // Add a silent track spanning the full video duration so the mix
+      // always covers the entire video (prevents truncation).
+      mixFilters.push(`anullsrc=r=44100:cl=stereo,atrim=0:${totalDuration}[silence]`);
+      const silenceIdx = audioItems.length;
+
+      // Mix all audio streams + silence
+      const labels = audioItems.map((_, i) => `[a${i}]`).join("") + `[silence]`;
+      mixFilters.push(`${labels}amix=inputs=${audioItems.length + 1}:duration=longest:normalize=0[mixed]`);
+
+      const mixFilterScript = writeFilterScript(mixFilters.join(";\n"));
+      await execFileAsync("ffmpeg", [
+        "-y",
+        ...mixInputs,
+        "-filter_complex_script", mixFilterScript,
+        "-map", "0:v",
+        "-map", "[mixed]",
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+        "-movflags", "+faststart",
+        outputFile,
+      ], { maxBuffer: 50 * 1024 * 1024 });
+
+      if (existsSync(concatTmp)) unlinkSync(concatTmp);
+    } else {
+      // No audio at all — just use the concatenated video
+      copyFileSync(concatTmp, outputFile);
+      unlinkSync(concatTmp);
+    }
+
+    // Clean up temp audio files
+    for (const item of audioItems) {
+      if (item.temp) {
+        try { if (existsSync(item.path)) unlinkSync(item.path); } catch {}
+      }
+    }
 
     // Clean up temp files
     for (const f of tempFiles) {
@@ -500,6 +714,25 @@ app.delete("/api/cache", (req, res) => {
     const files = readdirSync(CACHE_DIR).filter(f => f.endsWith(".mp4"));
     for (const f of files) unlinkSync(join(CACHE_DIR, f));
     res.json({ ok: true, cleared: files.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- TTS API ---
+app.get("/api/tts/voices", async (req, res) => {
+  try {
+    const voices = await getVoices();
+    res.json({ voices });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/tts", async (req, res) => {
+  try {
+    const result = await synthesize(req.body);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

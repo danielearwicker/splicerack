@@ -4,6 +4,12 @@ output:
   fps: 30
   background: "#1a1a2e"
 
+audio-templates:
+  narrator:
+    type: tts
+    voice: en-GB-RyanNeural
+    volume: 0.9
+
 templates:
   heading:
     type: "caption"
@@ -79,12 +85,21 @@ timeline:
     clip: "product"
     speed: 1
     fade-in: 0.3
+    audio:
+      - template: narrator
+        text: "Here we can see how to add a new product from the supplier list. Simply search for the item and click to add it."
 
   - type: section title
     text: "Amanda - all emails"
 
   - type: comms clip
     clip: "diagram"
+    audio:
+      - type: source
+        volume: 0.3
+      - template: narrator
+        text: "This diagram shows how Amanda's email communications are routed. All incoming messages are captured and logged automatically."
+        delay: 1
 
   - type: section title
     text: "Henry - selected emails"

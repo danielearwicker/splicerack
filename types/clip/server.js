@@ -72,12 +72,7 @@ export default {
       outFile,
     ];
 
-    // If there's audio and no speed change, include it
-    if (speed === 1.0 && !seg.audio) {
-      args.splice(args.indexOf("-an"), 1);
-      args.splice(args.indexOf(outFile), 0, "-c:a", "aac", "-b:a", "128k");
-    }
-
+    // Always video-only — the audio mixer handles audio layers separately
     await ctx.execFileAsync("ffmpeg", args, { maxBuffer: 50 * 1024 * 1024 });
   },
 };

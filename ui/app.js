@@ -37,6 +37,28 @@ const outputViewerTitle = $("#output-viewer-title");
 const outputInfo = $("#output-info");
 const outputFileSize = $("#output-file-size");
 
+// --- Logs ---
+const logsContainer = $("#logs-container");
+const logsProgress = $("#logs-progress");
+const logsProgressFill = $("#logs-progress-fill");
+const logsProgressText = $("#logs-progress-text");
+$("#btn-clear-logs").addEventListener("click", () => { logsContainer.innerHTML = ""; });
+
+function addLog(level, message) {
+  const entry = document.createElement("div");
+  entry.className = `log-entry log-${level}`;
+  const time = new Date().toLocaleTimeString("en-GB", { hour12: false });
+  entry.innerHTML = `<span class="log-time">${time}</span>${escapeHtml(message)}`;
+  logsContainer.appendChild(entry);
+  logsContainer.scrollTop = logsContainer.scrollHeight;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 // Format time as M:SS.mmm
 function formatTime(seconds) {
   if (seconds == null || isNaN(seconds)) return "--:--.---";
@@ -1070,6 +1092,316 @@ async function renderEditorPanel(index) {
 
     editorFields.appendChild(row);
   }
+
+  // --- Audio Layers Section (universal, all segment types) ---
+  if (resolvedType !== "stack") { // stack has its own layer system
+    editorFields.appendChild(buildAudioLayersEditor(index, rawSeg));
+  }
+}
+
+// Audio layer type schemas
+const AUDIO_LAYER_SCHEMAS = {
+  source: [
+    { key: "volume", label: "Volume", type: "number", default: 1, min: 0, max: 2, step: 0.1 },
+    { key: "mute", label: "Mute", type: "dropdown", default: "false", options: ["false", "true"] },
+  ],
+  tts: [
+    { key: "text", label: "Text", type: "string", default: "" },
+    { key: "voice", label: "Voice", type: "voice-dropdown", default: "" },
+    { key: "volume", label: "Volume", type: "number", default: 1, min: 0, max: 2, step: 0.1 },
+    { key: "delay", label: "Delay (s)", type: "number", default: 0, step: 0.1 },
+  ],
+  file: [
+    { key: "source", label: "File", type: "audio-file", default: "" },
+    { key: "volume", label: "Volume", type: "number", default: 1, min: 0, max: 2, step: 0.1 },
+    { key: "delay", label: "Delay (s)", type: "number", default: 0, step: 0.1 },
+    { key: "loop", label: "Loop", type: "dropdown", default: "false", options: ["false", "true"] },
+  ],
+};
+
+// Voice list cache
+let voicesCache = null;
+async function getVoicesList() {
+  if (voicesCache) return voicesCache;
+  try {
+    const res = await fetch("/api/tts/voices");
+    const data = await res.json();
+    voicesCache = data.voices || [];
+  } catch {
+    voicesCache = [];
+  }
+  return voicesCache;
+}
+
+// Audio file list cache
+let audioFilesCache = null;
+async function getAudioFiles() {
+  if (audioFilesCache) return audioFilesCache;
+  try {
+    const res = await fetch("/api/library?type=audio");
+    const data = await res.json();
+    audioFilesCache = data.files || [];
+  } catch {
+    audioFilesCache = [];
+  }
+  return audioFilesCache;
+}
+
+function buildAudioLayersEditor(segIndex, rawSeg) {
+  const container = document.createElement("div");
+  container.style.padding = "0 12px 8px";
+
+  const header = document.createElement("div");
+  header.className = "prop-group-header";
+  header.textContent = "Audio";
+  container.appendChild(header);
+
+  const audioLayers = rawSeg.audio || [];
+
+  for (let ai = 0; ai < audioLayers.length; ai++) {
+    const layer = audioLayers[ai];
+    const card = document.createElement("div");
+    card.className = "layer-card";
+
+    // Header row
+    const cardHeader = document.createElement("div");
+    cardHeader.className = "layer-card-header";
+
+    const num = document.createElement("span");
+    num.className = "layer-num";
+    num.textContent = `${ai + 1}`;
+    cardHeader.appendChild(num);
+
+    // Type dropdown (source/tts/file + audio templates)
+    const typeSelect = document.createElement("select");
+    const audioTypes = ["source", "tts", "file"];
+
+    // Only show "source" for clip segments
+    const segType = rawSeg.type;
+    const resolvedSegType = isKnownType(segType) ? segType :
+      ((projectData.templates || {})[segType] || {}).type || segType;
+
+    for (const t of audioTypes) {
+      if (t === "source" && resolvedSegType !== "clip") continue;
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t;
+      if ((layer.type || "") === t) opt.selected = true;
+      typeSelect.appendChild(opt);
+    }
+
+    // Audio templates
+    const audioTemplates = projectData["audio-templates"] || {};
+    const templateNames = Object.keys(audioTemplates);
+    if (templateNames.length > 0) {
+      const tGroup = document.createElement("optgroup");
+      tGroup.label = "Templates";
+      for (const name of templateNames) {
+        const opt = document.createElement("option");
+        opt.value = `template:${name}`;
+        opt.textContent = `${name} (${audioTemplates[name].type || "?"})`;
+        if (layer.template === name) opt.selected = true;
+        tGroup.appendChild(opt);
+      }
+      typeSelect.appendChild(tGroup);
+    }
+
+    typeSelect.addEventListener("change", () => {
+      const val = typeSelect.value;
+      if (val.startsWith("template:")) {
+        const tmplName = val.slice(9);
+        audioLayers[ai] = { template: tmplName };
+      } else {
+        const newLayer = { type: val };
+        if (val === "source") { newLayer.volume = 1; }
+        else if (val === "tts") { newLayer.text = ""; newLayer.voice = ""; newLayer.volume = 1; }
+        else if (val === "file") { newLayer.source = ""; newLayer.volume = 1; }
+        audioLayers[ai] = newLayer;
+      }
+      if (!rawSeg.audio) rawSeg.audio = audioLayers;
+      syncYamlFromData();
+      renderEditorPanel(segIndex);
+    });
+    cardHeader.appendChild(typeSelect);
+
+    // Delete button
+    const actions = document.createElement("span");
+    actions.className = "layer-actions";
+    const delBtn = document.createElement("button");
+    delBtn.className = "layer-delete";
+    delBtn.textContent = "\u00D7";
+    delBtn.addEventListener("click", () => {
+      audioLayers.splice(ai, 1);
+      if (audioLayers.length === 0) delete rawSeg.audio;
+      syncYamlFromData();
+      renderEditorPanel(segIndex);
+    });
+    actions.appendChild(delBtn);
+    cardHeader.appendChild(actions);
+    card.appendChild(cardHeader);
+
+    // Resolve template if needed
+    const resolvedLayer = layer.template
+      ? { ...audioTemplates[layer.template], ...layer }
+      : layer;
+    const layerType = resolvedLayer.type;
+    const schema = AUDIO_LAYER_SCHEMAS[layerType];
+
+    if (layer.template) {
+      const tmplInfo = document.createElement("div");
+      tmplInfo.className = "editor-template-info";
+      tmplInfo.style.margin = "2px 0";
+      tmplInfo.style.borderRadius = "3px";
+      tmplInfo.textContent = `Template: ${layer.template}`;
+      card.appendChild(tmplInfo);
+    }
+
+    // Render schema fields for this audio layer type
+    if (schema) {
+      const subProps = document.createElement("div");
+      subProps.className = "layer-subprops";
+
+      for (const sp of schema) {
+        const subRow = document.createElement("div");
+        subRow.className = "prop-row";
+
+        const subLabel = document.createElement("label");
+        subLabel.textContent = sp.label;
+        subRow.appendChild(subLabel);
+
+        const val = resolvedLayer[sp.key];
+        const displayVal = val != null ? val : sp.default;
+        const isInherited = layer.template && layer[sp.key] === undefined;
+        if (isInherited) subRow.classList.add("prop-inherited");
+
+        if (sp.type === "string") {
+          const input = document.createElement("input");
+          input.type = "text";
+          input.value = displayVal || "";
+          input.addEventListener("change", () => {
+            layer[sp.key] = input.value;
+            syncYamlFromData();
+          });
+          subRow.appendChild(input);
+
+        } else if (sp.type === "number") {
+          const input = document.createElement("input");
+          input.type = "number";
+          input.value = displayVal != null ? displayVal : "";
+          if (sp.min != null) input.min = sp.min;
+          if (sp.max != null) input.max = sp.max;
+          if (sp.step != null) input.step = sp.step;
+          input.addEventListener("change", () => {
+            layer[sp.key] = parseFloat(input.value);
+            syncYamlFromData();
+          });
+          subRow.appendChild(input);
+
+        } else if (sp.type === "dropdown") {
+          const sel = document.createElement("select");
+          for (const o of sp.options) {
+            const opt = document.createElement("option");
+            opt.value = o;
+            opt.textContent = o;
+            if (String(displayVal) === o) opt.selected = true;
+            sel.appendChild(opt);
+          }
+          sel.addEventListener("change", () => {
+            layer[sp.key] = sel.value === "true" ? true : sel.value === "false" ? false : sel.value;
+            syncYamlFromData();
+          });
+          subRow.appendChild(sel);
+
+        } else if (sp.type === "voice-dropdown") {
+          const sel = document.createElement("select");
+          const loading = document.createElement("option");
+          loading.value = displayVal || "";
+          loading.textContent = displayVal || "Loading voices...";
+          sel.appendChild(loading);
+          // Populate async
+          getVoicesList().then((voices) => {
+            sel.innerHTML = "";
+            const empty = document.createElement("option");
+            empty.value = "";
+            empty.textContent = "-- select voice --";
+            sel.appendChild(empty);
+            for (const v of voices) {
+              const opt = document.createElement("option");
+              opt.value = v.name;
+              opt.textContent = `${v.name} (${v.gender}, ${v.localeName})`;
+              if (displayVal === v.name) opt.selected = true;
+              sel.appendChild(opt);
+            }
+          });
+          sel.addEventListener("change", () => {
+            layer[sp.key] = sel.value;
+            syncYamlFromData();
+          });
+          subRow.appendChild(sel);
+
+        } else if (sp.type === "audio-file") {
+          const sel = document.createElement("select");
+          const empty = document.createElement("option");
+          empty.value = "";
+          empty.textContent = "-- select audio --";
+          sel.appendChild(empty);
+          // Populate async
+          getAudioFiles().then((files) => {
+            for (const f of files) {
+              const opt = document.createElement("option");
+              opt.value = f.name;
+              opt.textContent = f.name;
+              if (displayVal === f.name) opt.selected = true;
+              sel.appendChild(opt);
+            }
+          });
+          sel.addEventListener("change", () => {
+            layer[sp.key] = sel.value;
+            syncYamlFromData();
+          });
+          subRow.appendChild(sel);
+        }
+
+        // Revert button for template overrides
+        if (layer.template && layer[sp.key] !== undefined) {
+          const revertBtn = document.createElement("button");
+          revertBtn.className = "prop-revert";
+          revertBtn.textContent = "\u21A9";
+          revertBtn.title = "Revert to template value";
+          revertBtn.addEventListener("click", () => {
+            delete layer[sp.key];
+            syncYamlFromData();
+            renderEditorPanel(segIndex);
+          });
+          subRow.appendChild(revertBtn);
+        } else if (isInherited) {
+          const lbl = document.createElement("span");
+          lbl.className = "prop-inherit-label";
+          lbl.textContent = "template";
+          subRow.appendChild(lbl);
+        }
+
+        subProps.appendChild(subRow);
+      }
+      card.appendChild(subProps);
+    }
+
+    container.appendChild(card);
+  }
+
+  // Add audio layer button
+  const addBtn = document.createElement("button");
+  addBtn.className = "layers-add-btn";
+  addBtn.textContent = "+ Add Audio Layer";
+  addBtn.addEventListener("click", () => {
+    if (!rawSeg.audio) rawSeg.audio = [];
+    rawSeg.audio.push({ type: "tts", text: "", voice: "", volume: 1 });
+    syncYamlFromData();
+    renderEditorPanel(segIndex);
+  });
+  container.appendChild(addBtn);
+
+  return container;
 }
 
 function updateSegmentProperty(index, key, value) {
@@ -1334,6 +1666,19 @@ function syncYamlFromData() {
     }
   }
 
+  // Audio templates section
+  const audioTemplates = projectData["audio-templates"];
+  if (audioTemplates && Object.keys(audioTemplates).length > 0) {
+    lines.push("audio-templates:");
+    for (const [name, tmpl] of Object.entries(audioTemplates)) {
+      lines.push(`  ${name}:`);
+      for (const line of serializeObject(tmpl, "    ")) {
+        lines.push(line);
+      }
+      lines.push("");
+    }
+  }
+
   lines.push("timeline:");
 
   for (const seg of projectData.timeline) {
@@ -1356,6 +1701,25 @@ function syncYamlFromData() {
       const typeDef = SpliceRack.types[seg.type];
       if (typeDef && typeDef.serialize) {
         typeDef.serialize(seg, lines);
+      }
+    }
+
+    // Serialize audio layers (universal, all segment types)
+    if (seg.audio && seg.audio.length > 0) {
+      lines.push("    audio:");
+      for (const a of seg.audio) {
+        const firstKey = a.template ? "template" : "type";
+        const firstVal = a.template || a.type;
+        lines.push(`      - ${firstKey}: ${firstVal}`);
+        for (const [k, v] of Object.entries(a)) {
+          if (k === "type" || k === "template") continue;
+          if (v === undefined) continue;
+          if (typeof v === "string") {
+            lines.push(`        ${k}: "${v.replace(/"/g, '\\"')}"`);
+          } else {
+            lines.push(`        ${k}: ${v}`);
+          }
+        }
       }
     }
 
@@ -1490,6 +1854,7 @@ function connectWS() {
     const msg = JSON.parse(e.data);
     if (msg.type === "library-updated") {
       libraryFilesCache = null;
+      audioFilesCache = null;
       loadLibrary();
     } else if (msg.type === "clips-updated") {
       delete clipCache[msg.filename];
@@ -1500,16 +1865,29 @@ function connectWS() {
     } else if (msg.type === "render-started") {
       renderStatus.style.display = "";
       renderStatusText.textContent = "Rendering...";
+      logsProgress.style.display = "";
+      logsProgressFill.style.width = "0%";
+      logsProgressText.textContent = "Rendering...";
+      switchTab("logs-tab");
+      addLog("info", `Render started: ${msg.filename}`);
     } else if (msg.type === "render-progress") {
       const pct = ((msg.segment + 1) / msg.total) * 100;
       renderProgressFill.style.width = `${pct}%`;
+      logsProgressFill.style.width = `${pct}%`;
       const cacheNote = msg.cached ? " [cached]" : "";
-      renderStatusText.textContent = `Rendering segment ${msg.segment + 1}/${msg.total} (${msg.segmentType})${cacheNote}...`;
+      const text = `Segment ${msg.segment + 1}/${msg.total} (${msg.segmentType})${cacheNote}`;
+      renderStatusText.textContent = `Rendering ${text}...`;
+      logsProgressText.textContent = `Rendering ${text}...`;
+      addLog("progress", text);
     } else if (msg.type === "render-complete") {
       renderProgressFill.style.width = "100%";
       renderStatusText.textContent = "Render complete!";
+      logsProgressFill.style.width = "100%";
+      logsProgressText.textContent = "Render complete!";
+      addLog("success", `Render complete: ${msg.filename}`);
       setTimeout(() => {
         renderStatus.style.display = "none";
+        logsProgress.style.display = "none";
       }, 3000);
       // Navigate to outputs tab and select the new file
       if (msg.filename) {
@@ -1518,7 +1896,15 @@ function connectWS() {
       }
     } else if (msg.type === "outputs-updated") {
       loadOutputs();
+    } else if (msg.type === "render-phase") {
+      logsProgressText.textContent = msg.phase;
+      renderStatusText.textContent = msg.phase;
+      addLog("info", msg.phase);
+    } else if (msg.type === "audio-warning") {
+      for (const err of msg.errors) addLog("warning", `Audio: ${err}`);
+      renderStatusText.textContent = `Audio warning: ${msg.errors.join("; ")}`;
     } else if (msg.type === "render-error") {
+      for (const err of msg.errors) addLog("error", err);
       renderStatusText.textContent = `Render failed: ${msg.errors.join("; ")}`;
     }
   });
