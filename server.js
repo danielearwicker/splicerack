@@ -12,7 +12,7 @@ import { createHash } from "crypto";
 import { copyFileSync } from "fs";
 import yaml from "js-yaml";
 import { loadTypes } from "./types/index.js";
-import { buildFadeFilter } from "./types/_helpers.js";
+import { buildFadeFilter, buildKeyframeFilter } from "./types/_helpers.js";
 import { getVoices, synthesize } from "./services/tts.js";
 
 const execFileAsync = promisify(execFile);
@@ -160,6 +160,34 @@ app.get("/api/thumbnail/:filename", async (req, res) => {
   }
 });
 
+// Full-resolution frame extraction (for AI-assisted zoom targeting)
+app.get("/api/frame/:filename", async (req, res) => {
+  const filePath = join(LIBRARY_DIR, req.params.filename);
+  const time = req.query.time || "0";
+  if (!existsSync(filePath)) {
+    return res.status(404).json({ error: "File not found" });
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      "ffmpeg",
+      [
+        "-ss", String(time),
+        "-i", filePath,
+        "-vframes", "1",
+        "-f", "image2pipe",
+        "-vcodec", "mjpeg",
+        "-q:v", "2",
+        "-",
+      ],
+      { encoding: "buffer", maxBuffer: 20 * 1024 * 1024 }
+    );
+    res.set("Content-Type", "image/jpeg");
+    res.send(stdout);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Clips sidecar file management
 function clipsPath(filename) {
   return join(LIBRARY_DIR, filename + ".clips.json");
@@ -281,6 +309,33 @@ async function renderCached(seg, outFile, ctx) {
 
   await renderer.render(seg, outFile, ctx);
 
+  // Post-process: keyframe zoom/pan animation
+  if (seg.keyframes && seg.keyframes.length >= 2) {
+    // Probe source dimensions
+    let srcW = ctx.width, srcH = ctx.height;
+    try {
+      const { stdout } = await execFileAsync("ffprobe", [
+        "-v", "quiet", "-print_format", "json", "-show_streams", outFile,
+      ]);
+      const streams = JSON.parse(stdout).streams;
+      const video = streams.find((s) => s.codec_type === "video");
+      if (video) { srcW = video.width; srcH = video.height; }
+    } catch {}
+
+    const kfFilter = buildKeyframeFilter(seg.keyframes, ctx.fps, srcW, srcH, ctx.width, ctx.height);
+    const kfScript = ctx.writeFilterScript(kfFilter);
+    const kfTmp = outFile.replace(".mp4", "_kf.mp4");
+    await execFileAsync("ffmpeg", [
+      "-y", "-i", outFile,
+      "-filter_complex_script", kfScript,
+      "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+      "-an", kfTmp,
+    ], { maxBuffer: 50 * 1024 * 1024 });
+    unlinkSync(outFile);
+    copyFileSync(kfTmp, outFile);
+    unlinkSync(kfTmp);
+  }
+
   // Video-only output — audio is mixed globally after concat.
 
   // Cache the result
@@ -347,12 +402,26 @@ const BUILTIN_TYPES = new Set(rendererRegistry.keys());
 function resolveTemplates(project) {
   const templates = project.templates || {};
   const timeline = project.timeline || [];
-  return timeline.map((seg) => {
-    if (BUILTIN_TYPES.has(seg.type)) return seg;
+
+  function resolveSeg(seg) {
+    if (BUILTIN_TYPES.has(seg.type)) {
+      // Resolve stack layers recursively
+      if (seg.type === "stack" && seg.layers) {
+        return { ...seg, layers: seg.layers.map(resolveSeg) };
+      }
+      return seg;
+    }
     const template = templates[seg.type];
-    if (!template) return seg; // unknown type, leave as-is for error reporting
-    return deepMerge(template, seg);
-  });
+    if (!template) return seg;
+    const resolved = deepMerge(template, seg);
+    // Resolve stack layers recursively
+    if (resolved.type === "stack" && resolved.layers) {
+      resolved.layers = resolved.layers.map(resolveSeg);
+    }
+    return resolved;
+  }
+
+  return timeline.map(resolveSeg);
 }
 
 // Deep merge: template is the base, segment overrides.
@@ -539,7 +608,8 @@ app.post("/api/render/:filename", async (req, res) => {
 
     // Collect all audio layers with absolute positioning.
     const audioItems = []; // { path, absoluteStart, volume, loop, temp }
-    const audioTemplates = project["audio-templates"] || {};
+    const templates = project.templates || {};
+    const AUDIO_TYPES = new Set(["source", "tts", "file"]);
     const audioErrors = [];
 
     for (let i = 0; i < timeline.length; i++) {
@@ -547,14 +617,14 @@ app.post("/api/render/:filename", async (req, res) => {
       if (!seg.audio || seg.audio.length === 0) continue;
 
       for (const rawLayer of seg.audio) {
-        // Resolve audio template
+        // Resolve audio template: if type is not a built-in audio type, look up in templates
         let layer = rawLayer;
-        if (rawLayer.template) {
-          const tmpl = audioTemplates[rawLayer.template];
+        if (rawLayer.type && !AUDIO_TYPES.has(rawLayer.type)) {
+          const tmpl = templates[rawLayer.type];
           if (tmpl) {
             layer = { ...tmpl };
             for (const [k, v] of Object.entries(rawLayer)) {
-              if (k !== "template" && v !== undefined) layer[k] = v;
+              if (k !== "type" && v !== undefined) layer[k] = v;
             }
           }
         }
@@ -780,6 +850,11 @@ function broadcast(msg) {
     }
   }
 }
+
+// SPA fallback — serve index.html for any unmatched route
+app.get("*", (req, res) => {
+  res.sendFile(join(__dirname, "ui", "index.html"));
+});
 
 const PORT = process.env.PORT || 3344;
 server.listen(PORT, () => {

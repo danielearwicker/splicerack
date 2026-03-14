@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SpliceRack</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/api/types.css">
 </head>
 <body>
@@ -99,21 +99,23 @@
               <button id="btn-add-segment">+ Add</button>
             </div>
           </div>
-          <div id="timeline-track" class="timeline-track">
-            <div class="timeline-empty">Open or create a project to start</div>
-          </div>
-          <!-- Segment property editor -->
-          <div id="segment-editor" class="segment-editor" style="display:none">
-            <div class="segment-editor-header">
-              <h3>Segment Properties</h3>
-              <button id="btn-close-editor" class="editor-close">&times;</button>
+          <div class="timeline-body">
+            <div id="timeline-track" class="timeline-track">
+              <div class="timeline-empty">Open or create a project to start</div>
             </div>
-            <div class="segment-editor-type-row">
-              <label>Type</label>
-              <select id="editor-type-select"></select>
+            <!-- Segment property editor -->
+            <div id="segment-editor" class="segment-editor" style="display:none">
+              <div class="segment-editor-header">
+                <h3>Segment Properties</h3>
+                <button id="btn-close-editor" class="editor-close">&times;</button>
+              </div>
+              <div class="segment-editor-type-row">
+                <label>Type</label>
+                <select id="editor-type-select"></select>
+              </div>
+              <div id="editor-template-info" class="editor-template-info" style="display:none"></div>
+              <div id="editor-fields" class="editor-fields"></div>
             </div>
-            <div id="editor-template-info" class="editor-template-info" style="display:none"></div>
-            <div id="editor-fields" class="editor-fields"></div>
           </div>
 
           <!-- Render status -->
@@ -166,8 +168,8 @@
       </div>
     </div>
   </div>
-  <script src="type-registry.js"></script>
+  <script src="/type-registry.js"></script>
   <script src="/api/types.js"></script>
-  <script src="app.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>

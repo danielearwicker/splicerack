@@ -68,12 +68,81 @@ function formatTime(seconds) {
 }
 
 // --- Tabs ---
-function switchTab(tabId) {
+// --- Routing ---
+const TAB_ROUTES = {
+  "library-tab": "/library",
+  "timeline-tab": "/timeline",
+  "outputs-tab": "/outputs",
+  "logs-tab": "/logs",
+};
+const ROUTE_TABS = Object.fromEntries(Object.entries(TAB_ROUTES).map(([k, v]) => [v, k]));
+
+function switchTab(tabId, { pushState = true } = {}) {
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tabId));
   $$(".tab-content").forEach((c) => c.classList.toggle("active", c.id === tabId));
   if (tabId === "timeline-tab") loadProjects();
   if (tabId === "outputs-tab") loadOutputs();
+
+  if (pushState) {
+    const basePath = TAB_ROUTES[tabId] || "/";
+    let fullPath = basePath;
+    if (tabId === "timeline-tab" && currentProject) {
+      fullPath = `${basePath}/${encodeURIComponent(currentProject)}`;
+    } else if (tabId === "outputs-tab" && currentOutput) {
+      fullPath = `${basePath}/${encodeURIComponent(currentOutput)}`;
+    }
+    if (location.pathname !== fullPath) {
+      history.pushState(null, "", fullPath);
+    }
+  }
 }
+
+function updateRoute() {
+  const basePath = TAB_ROUTES[getActiveTab()] || "/";
+  let fullPath = basePath;
+  if (getActiveTab() === "timeline-tab" && currentProject) {
+    fullPath = `${basePath}/${encodeURIComponent(currentProject)}`;
+  } else if (getActiveTab() === "outputs-tab" && currentOutput) {
+    fullPath = `${basePath}/${encodeURIComponent(currentOutput)}`;
+  }
+  if (location.pathname !== fullPath) {
+    history.pushState(null, "", fullPath);
+  }
+}
+
+function getActiveTab() {
+  for (const c of $$(".tab-content")) {
+    if (c.classList.contains("active")) return c.id;
+  }
+  return "library-tab";
+}
+
+function navigateFromUrl() {
+  const path = decodeURIComponent(location.pathname);
+  const parts = path.split("/").filter(Boolean);
+  const section = parts[0] || "library";
+  const param = parts.slice(1).join("/");
+  const tabId = ROUTE_TABS[`/${section}`];
+  if (!tabId) {
+    // Unknown route or root — go to library
+    switchTab("library-tab", { pushState: false });
+    history.replaceState(null, "", "/library");
+    return;
+  }
+
+  switchTab(tabId, { pushState: false });
+
+  if (tabId === "timeline-tab" && param) {
+    loadProjects().then(() => {
+      projectSelect.value = param;
+      loadProject(param);
+    });
+  } else if (tabId === "outputs-tab" && param) {
+    loadOutputs().then(() => selectOutput(param));
+  }
+}
+
+window.addEventListener("popstate", () => navigateFromUrl());
 
 for (const tab of $$(".tab")) {
   tab.addEventListener("click", () => switchTab(tab.dataset.tab));
@@ -363,6 +432,7 @@ async function loadProject(filename) {
       projectData = null;
     }
     renderTimeline();
+    updateRoute();
   } catch (err) {
     console.error("Failed to load project:", err);
   }
@@ -1097,6 +1167,149 @@ async function renderEditorPanel(index) {
   if (resolvedType !== "stack") { // stack has its own layer system
     editorFields.appendChild(buildAudioLayersEditor(index, rawSeg));
   }
+
+  // --- Keyframes Section (universal, all segment types) ---
+  editorFields.appendChild(buildKeyframesEditor(index, rawSeg));
+}
+
+function buildKeyframesEditor(segIndex, rawSeg) {
+  const container = document.createElement("div");
+  container.style.padding = "0 12px 8px";
+
+  const header = document.createElement("div");
+  header.className = "prop-group-header";
+  header.textContent = "Keyframes";
+  container.appendChild(header);
+
+  const keyframes = rawSeg.keyframes || [];
+
+  for (let ki = 0; ki < keyframes.length; ki++) {
+    const kf = keyframes[ki];
+    const card = document.createElement("div");
+    card.className = "layer-card";
+
+    const cardHeader = document.createElement("div");
+    cardHeader.className = "layer-card-header";
+
+    const num = document.createElement("span");
+    num.className = "layer-num";
+    num.textContent = `${ki + 1}`;
+    cardHeader.appendChild(num);
+
+    const timeLabel = document.createElement("span");
+    timeLabel.style.cssText = "font-size:11px;color:#a0a0b0";
+    timeLabel.textContent = `t=${kf.time || 0}s  scale=${kf.scale || 1}x`;
+    cardHeader.appendChild(timeLabel);
+
+    const actions = document.createElement("span");
+    actions.className = "layer-actions";
+    if (ki > 0) {
+      const upBtn = document.createElement("button");
+      upBtn.textContent = "\u2191";
+      upBtn.addEventListener("click", () => {
+        [keyframes[ki - 1], keyframes[ki]] = [keyframes[ki], keyframes[ki - 1]];
+        syncYamlFromData();
+        renderEditorPanel(segIndex);
+      });
+      actions.appendChild(upBtn);
+    }
+    if (ki < keyframes.length - 1) {
+      const downBtn = document.createElement("button");
+      downBtn.textContent = "\u2193";
+      downBtn.addEventListener("click", () => {
+        [keyframes[ki], keyframes[ki + 1]] = [keyframes[ki + 1], keyframes[ki]];
+        syncYamlFromData();
+        renderEditorPanel(segIndex);
+      });
+      actions.appendChild(downBtn);
+    }
+    const delBtn = document.createElement("button");
+    delBtn.className = "layer-delete";
+    delBtn.textContent = "\u00D7";
+    delBtn.addEventListener("click", () => {
+      keyframes.splice(ki, 1);
+      if (keyframes.length === 0) delete rawSeg.keyframes;
+      syncYamlFromData();
+      renderEditorPanel(segIndex);
+    });
+    actions.appendChild(delBtn);
+    cardHeader.appendChild(actions);
+    card.appendChild(cardHeader);
+
+    // Keyframe fields
+    const fields = [
+      { key: "time", label: "Time (s)", step: 0.1, min: 0 },
+      { key: "scale", label: "Scale", step: 0.1, min: 0.1, max: 20 },
+      { key: "x", label: "X (0-1)", step: 0.01, min: 0, max: 1 },
+      { key: "y", label: "Y (0-1)", step: 0.01, min: 0, max: 1 },
+    ];
+
+    const subProps = document.createElement("div");
+    subProps.className = "layer-subprops";
+
+    for (const f of fields) {
+      const row = document.createElement("div");
+      row.className = "prop-row";
+      const label = document.createElement("label");
+      label.textContent = f.label;
+      row.appendChild(label);
+
+      const input = document.createElement("input");
+      input.type = "number";
+      input.value = kf[f.key] != null ? kf[f.key] : (f.key === "scale" ? 1 : f.key === "x" || f.key === "y" ? 0.5 : 0);
+      if (f.step != null) input.step = f.step;
+      if (f.min != null) input.min = f.min;
+      if (f.max != null) input.max = f.max;
+      input.addEventListener("change", () => {
+        kf[f.key] = parseFloat(input.value);
+        // Update the summary label
+        timeLabel.textContent = `t=${kf.time || 0}s  scale=${kf.scale || 1}x`;
+        syncYamlFromData();
+      });
+      row.appendChild(input);
+      subProps.appendChild(row);
+    }
+
+    // Ease dropdown
+    const easeRow = document.createElement("div");
+    easeRow.className = "prop-row";
+    const easeLabel = document.createElement("label");
+    easeLabel.textContent = "Ease";
+    easeRow.appendChild(easeLabel);
+    const easeSel = document.createElement("select");
+    for (const e of ["linear", "ease-in-out"]) {
+      const opt = document.createElement("option");
+      opt.value = e;
+      opt.textContent = e;
+      if ((kf.ease || "linear") === e) opt.selected = true;
+      easeSel.appendChild(opt);
+    }
+    easeSel.addEventListener("change", () => {
+      kf.ease = easeSel.value;
+      syncYamlFromData();
+    });
+    easeRow.appendChild(easeSel);
+    subProps.appendChild(easeRow);
+
+    card.appendChild(subProps);
+    container.appendChild(card);
+  }
+
+  // Add keyframe button
+  const addBtn = document.createElement("button");
+  addBtn.className = "layers-add-btn";
+  addBtn.textContent = "+ Add Keyframe";
+  addBtn.addEventListener("click", () => {
+    if (!rawSeg.keyframes) rawSeg.keyframes = [];
+    // Default: time after last keyframe, centered, no zoom
+    const lastTime = rawSeg.keyframes.length > 0 ? rawSeg.keyframes[rawSeg.keyframes.length - 1].time || 0 : 0;
+    rawSeg.keyframes.push({ time: lastTime + 2, scale: 1, x: 0.5, y: 0.5 });
+    syncYamlFromData();
+    renderEditorPanel(segIndex);
+  });
+  container.appendChild(addBtn);
+
+  return container;
 }
 
 // Audio layer type schemas
@@ -1190,17 +1403,20 @@ function buildAudioLayersEditor(segIndex, rawSeg) {
       typeSelect.appendChild(opt);
     }
 
-    // Audio templates
-    const audioTemplates = projectData["audio-templates"] || {};
-    const templateNames = Object.keys(audioTemplates);
-    if (templateNames.length > 0) {
+    // Audio templates from unified templates list
+    const AUDIO_BUILTIN = new Set(["source", "tts", "file"]);
+    const allTemplates = projectData.templates || {};
+    const audioTemplateNames = Object.keys(allTemplates).filter(
+      (name) => AUDIO_BUILTIN.has(allTemplates[name].type)
+    );
+    if (audioTemplateNames.length > 0) {
       const tGroup = document.createElement("optgroup");
       tGroup.label = "Templates";
-      for (const name of templateNames) {
+      for (const name of audioTemplateNames) {
         const opt = document.createElement("option");
-        opt.value = `template:${name}`;
-        opt.textContent = `${name} (${audioTemplates[name].type || "?"})`;
-        if (layer.template === name) opt.selected = true;
+        opt.value = name;
+        opt.textContent = `${name} (${allTemplates[name].type})`;
+        if (layer.type === name) opt.selected = true;
         tGroup.appendChild(opt);
       }
       typeSelect.appendChild(tGroup);
@@ -1208,9 +1424,9 @@ function buildAudioLayersEditor(segIndex, rawSeg) {
 
     typeSelect.addEventListener("change", () => {
       const val = typeSelect.value;
-      if (val.startsWith("template:")) {
-        const tmplName = val.slice(9);
-        audioLayers[ai] = { template: tmplName };
+      if (!AUDIO_BUILTIN.has(val) && allTemplates[val]) {
+        // Template-based audio layer — just set type, overrides come from user
+        audioLayers[ai] = { type: val };
       } else {
         const newLayer = { type: val };
         if (val === "source") { newLayer.volume = 1; }
@@ -1240,19 +1456,20 @@ function buildAudioLayersEditor(segIndex, rawSeg) {
     cardHeader.appendChild(actions);
     card.appendChild(cardHeader);
 
-    // Resolve template if needed
-    const resolvedLayer = layer.template
-      ? { ...audioTemplates[layer.template], ...layer }
+    // Resolve template if type is not a built-in audio type
+    const isAudioTemplate = layer.type && !AUDIO_BUILTIN.has(layer.type) && allTemplates[layer.type];
+    const resolvedLayer = isAudioTemplate
+      ? { ...allTemplates[layer.type], ...layer, type: allTemplates[layer.type].type }
       : layer;
     const layerType = resolvedLayer.type;
     const schema = AUDIO_LAYER_SCHEMAS[layerType];
 
-    if (layer.template) {
+    if (isAudioTemplate) {
       const tmplInfo = document.createElement("div");
       tmplInfo.className = "editor-template-info";
       tmplInfo.style.margin = "2px 0";
       tmplInfo.style.borderRadius = "3px";
-      tmplInfo.textContent = `Template: ${layer.template}`;
+      tmplInfo.textContent = `Template: ${layer.type}`;
       card.appendChild(tmplInfo);
     }
 
@@ -1271,7 +1488,7 @@ function buildAudioLayersEditor(segIndex, rawSeg) {
 
         const val = resolvedLayer[sp.key];
         const displayVal = val != null ? val : sp.default;
-        const isInherited = layer.template && layer[sp.key] === undefined;
+        const isInherited = isAudioTemplate && layer[sp.key] === undefined;
         if (isInherited) subRow.classList.add("prop-inherited");
 
         if (sp.type === "string") {
@@ -1363,7 +1580,7 @@ function buildAudioLayersEditor(segIndex, rawSeg) {
         }
 
         // Revert button for template overrides
-        if (layer.template && layer[sp.key] !== undefined) {
+        if (isAudioTemplate && layer[sp.key] !== undefined) {
           const revertBtn = document.createElement("button");
           revertBtn.className = "prop-revert";
           revertBtn.textContent = "\u21A9";
@@ -1666,19 +1883,6 @@ function syncYamlFromData() {
     }
   }
 
-  // Audio templates section
-  const audioTemplates = projectData["audio-templates"];
-  if (audioTemplates && Object.keys(audioTemplates).length > 0) {
-    lines.push("audio-templates:");
-    for (const [name, tmpl] of Object.entries(audioTemplates)) {
-      lines.push(`  ${name}:`);
-      for (const line of serializeObject(tmpl, "    ")) {
-        lines.push(line);
-      }
-      lines.push("");
-    }
-  }
-
   lines.push("timeline:");
 
   for (const seg of projectData.timeline) {
@@ -1708,11 +1912,9 @@ function syncYamlFromData() {
     if (seg.audio && seg.audio.length > 0) {
       lines.push("    audio:");
       for (const a of seg.audio) {
-        const firstKey = a.template ? "template" : "type";
-        const firstVal = a.template || a.type;
-        lines.push(`      - ${firstKey}: ${firstVal}`);
+        lines.push(`      - type: ${a.type}`);
         for (const [k, v] of Object.entries(a)) {
-          if (k === "type" || k === "template") continue;
+          if (k === "type") continue;
           if (v === undefined) continue;
           if (typeof v === "string") {
             lines.push(`        ${k}: "${v.replace(/"/g, '\\"')}"`);
@@ -1720,6 +1922,18 @@ function syncYamlFromData() {
             lines.push(`        ${k}: ${v}`);
           }
         }
+      }
+    }
+
+    // Serialize keyframes (universal, all segment types)
+    if (seg.keyframes && seg.keyframes.length > 0) {
+      lines.push("    keyframes:");
+      for (const kf of seg.keyframes) {
+        lines.push(`      - time: ${kf.time}`);
+        if (kf.scale != null) lines.push(`        scale: ${kf.scale}`);
+        if (kf.x != null) lines.push(`        x: ${kf.x}`);
+        if (kf.y != null) lines.push(`        y: ${kf.y}`);
+        if (kf.ease && kf.ease !== "linear") lines.push(`        ease: ${kf.ease}`);
       }
     }
 
@@ -1809,6 +2023,7 @@ function renderOutputsList(files) {
 
 function selectOutput(filename) {
   currentOutput = filename;
+  updateRoute();
   outputViewerTitle.textContent = filename;
   outputPlayer.src = `/output/${encodeURIComponent(filename)}`;
   outputPlayer.load();
@@ -1927,3 +2142,4 @@ yamlEditor.addEventListener("keydown", (e) => {
 // --- Init ---
 loadLibrary();
 connectWS();
+navigateFromUrl();
