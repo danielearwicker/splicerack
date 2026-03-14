@@ -604,5 +604,5 @@ function broadcast(msg) {
 
 const PORT = process.env.PORT || 3344;
 server.listen(PORT, () => {
-  console.log(`vAIdeo is running at http://localhost:${PORT}`);
+  console.log(`SpliceRack is running at http://localhost:${PORT}`);
 });

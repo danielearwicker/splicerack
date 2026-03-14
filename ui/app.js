@@ -302,7 +302,7 @@ $("#btn-new-project").addEventListener("click", () => {
   if (!name) return;
   const filename = name.endsWith(".yaml") || name.endsWith(".yml") ? name : name + ".yaml";
 
-  const template = `# vAIdeo Project
+  const template = `# SpliceRack Project
 output:
   width: 1920
   height: 1080
