@@ -1,0 +1,124 @@
+export default {
+  type: "stack",
+
+  async render(seg, outFile, ctx) {
+    const layers = seg.layers || [];
+    const bgColor = (seg.background || ctx.defaultBg).replace("#", "");
+
+    if (layers.length === 0) {
+      // Empty stack — render a blank frame
+      const duration = seg.duration || 1;
+      await ctx.execFileAsync("ffmpeg", [
+        "-y", "-f", "lavfi",
+        "-i", `color=c=0x${bgColor}:s=${ctx.width}x${ctx.height}:d=${duration}:r=${ctx.fps}`,
+        "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+        "-t", String(duration), outFile,
+      ], { maxBuffer: 50 * 1024 * 1024 });
+      return;
+    }
+
+    // Render each layer to a temp file, using cache where possible
+    const layerFiles = [];
+    for (let i = 0; i < layers.length; i++) {
+      const layer = layers[i];
+
+      const layerFile = ctx.join(ctx.OUTPUT_DIR, `_stack_layer_${i}_${Date.now()}.mp4`);
+      layerFiles.push(layerFile);
+
+      // Build a segment for the sub-renderer (without stack-specific props)
+      const layerSeg = { ...layer };
+      delete layerSeg.opacity;
+      delete layerSeg.delay;
+
+      await ctx.renderCached(layerSeg, layerFile, ctx);
+    }
+
+    if (layers.length === 1 && !layers[0].opacity && !layers[0].delay) {
+      // Single layer with no compositing — just use it directly
+      const { existsSync } = await import("fs");
+      const { rename } = await import("fs/promises");
+      await rename(layerFiles[0], outFile);
+      return;
+    }
+
+    // Determine total duration from the longest layer + delay
+    // We'll probe each layer for its duration
+    const layerDurations = [];
+    for (let i = 0; i < layerFiles.length; i++) {
+      try {
+        const { stdout } = await ctx.execFileAsync("ffprobe", [
+          "-v", "quiet", "-print_format", "json", "-show_format", layerFiles[i],
+        ]);
+        const info = JSON.parse(stdout);
+        layerDurations.push(parseFloat(info.format.duration) || 5);
+      } catch {
+        layerDurations.push(5);
+      }
+    }
+
+    const totalDuration = seg.duration || Math.max(
+      ...layers.map((l, i) => (l.delay || 0) + layerDurations[i])
+    );
+
+    // Build filter_complex for compositing
+    // Start with a solid background canvas
+    const inputs = [];
+    for (const f of layerFiles) {
+      inputs.push("-i", f);
+    }
+
+    const filterLines = [];
+    // Base canvas
+    filterLines.push(
+      `color=c=0x${bgColor}:s=${ctx.width}x${ctx.height}:d=${totalDuration}:r=${ctx.fps},format=yuva420p[base]`
+    );
+
+    let lastLabel = "base";
+    for (let i = 0; i < layers.length; i++) {
+      const opacity = layers[i].opacity != null ? layers[i].opacity : 1;
+      const delay = layers[i].delay || 0;
+
+      const layerLabel = `l${i}`;
+      const outLabel = `out${i}`;
+
+      // Build per-layer filter: handle delay and opacity
+      const layerFilters = [];
+      if (delay > 0) {
+        layerFilters.push(`tpad=start_duration=${delay}:color=black@0`);
+      }
+      layerFilters.push("format=yuva420p");
+      if (opacity < 1) {
+        layerFilters.push(`colorchannelmixer=aa=${opacity}`);
+      }
+
+      filterLines.push(`[${i}:v]${layerFilters.join(",")}[${layerLabel}]`);
+      filterLines.push(
+        `[${lastLabel}][${layerLabel}]overlay=0:0:eof_action=pass:format=yuv420p10[${outLabel}]`
+      );
+      lastLabel = outLabel;
+    }
+
+    // Final output conversion
+    filterLines.push(`[${lastLabel}]format=yuv420p[final]`);
+
+    const filterComplex = filterLines.join(";\n");
+    const filterScript = ctx.writeFilterScript(filterComplex);
+
+    await ctx.execFileAsync("ffmpeg", [
+      "-y",
+      ...inputs,
+      "-filter_complex_script", filterScript,
+      "-map", "[final]",
+      "-c:v", "libx264",
+      "-preset", "fast",
+      "-pix_fmt", "yuv420p",
+      "-t", String(totalDuration),
+      outFile,
+    ], { maxBuffer: 50 * 1024 * 1024 });
+
+    // Clean up layer temp files
+    for (const f of layerFiles) {
+      try { if (ctx.existsSync(f)) (await import("fs")).unlinkSync(f); } catch {}
+    }
+  },
+};

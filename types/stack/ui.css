@@ -1,0 +1,111 @@
+.seg-type-stack { background: #4a3a6a; color: #c8a0f0; }
+
+.layer-card {
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  margin: 4px 0;
+  padding: 6px 8px;
+}
+
+.layer-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.layer-card-header select {
+  background: #111128;
+  border: 1px solid #0f3460;
+  color: #e0e0e0;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.layer-card-header .layer-num {
+  font-size: 10px;
+  color: #808090;
+  font-weight: 600;
+  min-width: 14px;
+}
+
+.layer-card-header .layer-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+
+.layer-card-header .layer-actions button {
+  background: none;
+  border: 1px solid #0f3460;
+  color: #a0a0b0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.layer-card-header .layer-actions button:hover {
+  background: #0f3460;
+  color: #fff;
+}
+
+.layer-card-header .layer-actions button.layer-delete:hover {
+  background: #e94560;
+  border-color: #e94560;
+}
+
+.layer-stack-props {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding: 2px 0;
+}
+
+.layer-stack-props label {
+  font-size: 10px;
+  color: #808090;
+}
+
+.layer-stack-props input {
+  background: #111128;
+  border: 1px solid #0f3460;
+  color: #e0e0e0;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+  width: 60px;
+}
+
+.layer-subprops {
+  border-top: 1px solid #0f3460;
+  padding-top: 4px;
+  margin-top: 2px;
+}
+
+.layer-subprops .prop-row {
+  padding: 2px 4px;
+}
+
+.layer-subprops .prop-row label {
+  min-width: 80px;
+  font-size: 10px;
+}
+
+.layers-add-btn {
+  background: #0f3460;
+  color: #e0e0e0;
+  border: 1px solid #1a5276;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.layers-add-btn:hover {
+  background: #1a5276;
+}

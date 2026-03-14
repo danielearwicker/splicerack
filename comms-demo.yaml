@@ -6,7 +6,7 @@ output:
 
 templates:
   heading:
-    type: caption
+    type: "caption"
     duration: 3
     style:
       font-size: 64
@@ -18,7 +18,7 @@ templates:
     fade-out: 0.5
 
   section title:
-    type: caption
+    type: "caption"
     duration: 3
     style:
       font-size: 42
@@ -30,8 +30,8 @@ templates:
     fade-out: 1
 
   comms clip:
-    type: clip
-    source: comms-2026-03-01-clip-2.mp4
+    type: "clip"
+    source: "Communication with Suppliers.mp4"
     fade-in: 0.3
     fade-out: 0.3
 
@@ -39,29 +39,58 @@ timeline:
   - type: heading
     text: "Comms Explainer Demo Thingy"
 
+  - type: stack
+    background: "#1a1a2e"
+    layers:
+      - type: caption
+        text: "peas"
+        duration: 3
+        style:
+          font-size: 48
+          color: "#ffffff"
+          background: "#1a1a2e"
+          align: "left"
+          valign: "middle"
+        fade-in: 0.5
+        fade-out: 0.5
+        opacity: 0.5
+        delay: 0
+      - type: caption
+        text: "chips"
+        duration: 3
+        style:
+          font-size: 48
+          color: "#ffffff"
+          background: "#1a1a2e"
+          align: "right"
+          valign: "middle"
+        fade-in: 0.5
+        fade-out: 0.5
+        opacity: 0.5
+        delay: 0
+
   - type: section title
-    text: "Adding a thingy from suppliers"
+    text: "Adding a thingy from whatever"
+    style:
+      align: "right"
+      color: "#e7ad0d"
 
   - type: comms clip
-    clip: add contact from suppiers
+    clip: "product"
+    speed: 1
+    fade-in: 0.3
 
   - type: section title
     text: "Amanda - all emails"
 
   - type: comms clip
-    clip: amanda all emails
+    clip: "diagram"
 
   - type: section title
     text: "Henry - selected emails"
 
   - type: comms clip
-    clip: henry some emails
-
-  - type: section title
-    text: "Enrolling"
-
-  - type: comms clip
-    clip: enrol
+    clip: "email"
 
   - type: heading
     text: "Thanks for watching!"

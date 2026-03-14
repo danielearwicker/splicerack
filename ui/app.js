@@ -287,6 +287,7 @@ async function loadProjects() {
 
 projectSelect.addEventListener("change", () => {
   const filename = projectSelect.value;
+  closeEditor();
   if (filename) {
     loadProject(filename);
   } else {
@@ -345,7 +346,14 @@ async function loadProject(filename) {
   }
 }
 
-$("#btn-save-yaml").addEventListener("click", saveYaml);
+// Auto-save on typing with 500ms debounce
+let yamlDebounceTimer = null;
+yamlEditor.addEventListener("input", () => {
+  clearTimeout(yamlDebounceTimer);
+  yamlDebounceTimer = setTimeout(() => {
+    if (currentProject) saveYaml();
+  }, 500);
+});
 
 async function saveYaml() {
   if (!currentProject) return alert("No project selected");
@@ -361,6 +369,21 @@ async function saveYaml() {
       parseYamlAndRender();
       loadProjects();
     }
+  } catch (err) {
+    console.error("Failed to save:", err);
+  }
+}
+
+// Save to server without re-parsing — used by syncYamlFromData where
+// our in-memory projectData is the source of truth.
+async function saveYamlQuiet() {
+  if (!currentProject) return;
+  try {
+    await fetch(`/api/project/${encodeURIComponent(currentProject)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ raw: yamlEditor.value }),
+    });
   } catch (err) {
     console.error("Failed to save:", err);
   }
@@ -409,11 +432,53 @@ function resolveClipTimes(seg, sourceClips) {
   return null;
 }
 
+// Expose formatTime for type ui.js files
+SpliceRack.formatTime = formatTime;
+
+// Helper to check if a type is a known registered type (vs. a template name)
+function isKnownType(t) {
+  return !!SpliceRack.types[t];
+}
+
+// Dot-path helpers
+function getNestedValue(obj, path) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (const p of parts) {
+    if (cur == null || typeof cur !== "object") return undefined;
+    cur = cur[p];
+  }
+  return cur;
+}
+
+function setNestedValue(obj, path, value) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (cur[parts[i]] == null || typeof cur[parts[i]] !== "object") {
+      cur[parts[i]] = {};
+    }
+    cur = cur[parts[i]];
+  }
+  cur[parts[parts.length - 1]] = value;
+}
+
+function deleteNestedValue(obj, path) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (cur == null || typeof cur !== "object") return;
+    cur = cur[parts[i]];
+  }
+  if (cur != null && typeof cur === "object") {
+    delete cur[parts[parts.length - 1]];
+  }
+}
+
 // --- Template resolution (client-side, mirrors server logic) ---
-const BUILTIN_TYPES = new Set(["caption", "clip", "image", "pause"]);
 
 function resolveTemplate(seg, templates) {
-  if (BUILTIN_TYPES.has(seg.type)) return seg;
+  if (isKnownType(seg.type)) return seg;
   const template = templates[seg.type];
   if (!template) return seg;
   return deepMerge(template, seg);
@@ -436,6 +501,581 @@ function deepMerge(base, override) {
     }
   }
   return result;
+}
+
+// --- Segment property editor ---
+let selectedSegmentIndex = null;
+let libraryFilesCache = null;
+
+const segmentEditor = $("#segment-editor");
+const editorTypeSelect = $("#editor-type-select");
+const editorTemplateInfo = $("#editor-template-info");
+const editorFields = $("#editor-fields");
+
+$("#btn-close-editor").addEventListener("click", closeEditor);
+
+function closeEditor() {
+  segmentEditor.style.display = "none";
+  selectedSegmentIndex = null;
+  $$(".timeline-segment.selected").forEach((s) => s.classList.remove("selected"));
+}
+
+editorTypeSelect.addEventListener("change", () => {
+  if (selectedSegmentIndex == null || !projectData) return;
+  const newType = editorTypeSelect.value;
+  const seg = projectData.timeline[selectedSegmentIndex];
+  const oldResolvedType = isKnownType(seg.type) ? seg.type : ((projectData.templates || {})[seg.type] || {}).type || seg.type;
+
+  // Build a fresh segment with defaults for the new resolved type
+  const resolvedType = isKnownType(newType) ? newType : ((projectData.templates || {})[newType] || {}).type || newType;
+  const schema = (SpliceRack.types[resolvedType] || {}).schema;
+
+  if (isKnownType(newType)) {
+    // Switching to a built-in type: populate with defaults
+    const newSeg = { type: newType };
+    if (schema) {
+      for (const prop of schema) {
+        if (prop.default !== "" && prop.default !== undefined) {
+          setNestedValue(newSeg, prop.key, prop.default);
+        }
+      }
+    }
+    projectData.timeline[selectedSegmentIndex] = newSeg;
+  } else {
+    // Switching to a template: just set the type, template provides defaults
+    projectData.timeline[selectedSegmentIndex] = { type: newType };
+  }
+
+  syncYamlFromData();
+  renderEditorPanel(selectedSegmentIndex);
+});
+
+async function getLibraryFiles() {
+  if (libraryFilesCache) return libraryFilesCache;
+  try {
+    const res = await fetch("/api/library");
+    const data = await res.json();
+    libraryFilesCache = data.files || [];
+  } catch {
+    libraryFilesCache = [];
+  }
+  return libraryFilesCache;
+}
+
+async function renderEditorPanel(index) {
+  if (!projectData || !projectData.timeline || index >= projectData.timeline.length) {
+    closeEditor();
+    return;
+  }
+
+  selectedSegmentIndex = index;
+  segmentEditor.style.display = "";
+
+  const rawSeg = projectData.timeline[index];
+  const templates = projectData.templates || {};
+  const isTemplate = !isKnownType(rawSeg.type);
+  const resolvedSeg = resolveTemplate(rawSeg, templates);
+  const resolvedType = resolvedSeg.type;
+  const schema = (SpliceRack.types[resolvedType] || {}).schema;
+
+  if (!schema) {
+    editorFields.innerHTML = '<div style="padding:12px;color:#808090;font-size:12px">Unknown segment type</div>';
+    return;
+  }
+
+  // Populate type dropdown
+  editorTypeSelect.innerHTML = "";
+  const builtinGroup = document.createElement("optgroup");
+  builtinGroup.label = "Built-in";
+  for (const t of Object.keys(SpliceRack.types)) {
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.textContent = t;
+    if (rawSeg.type === t) opt.selected = true;
+    builtinGroup.appendChild(opt);
+  }
+  editorTypeSelect.appendChild(builtinGroup);
+
+  const templateNames = Object.keys(templates);
+  if (templateNames.length > 0) {
+    const templateGroup = document.createElement("optgroup");
+    templateGroup.label = "Templates";
+    for (const name of templateNames) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = `${name} (${templates[name].type || "?"})`;
+      if (rawSeg.type === name) opt.selected = true;
+      templateGroup.appendChild(opt);
+    }
+    editorTypeSelect.appendChild(templateGroup);
+  }
+
+  // Template info banner
+  if (isTemplate && templates[rawSeg.type]) {
+    editorTemplateInfo.style.display = "";
+    editorTemplateInfo.textContent = `Template: ${rawSeg.type} (${templates[rawSeg.type].type || "?"})`;
+  } else {
+    editorTemplateInfo.style.display = "none";
+  }
+
+  // Pre-fetch data needed for dropdowns
+  const libFiles = await getLibraryFiles();
+  let sourceClips = [];
+  const sourceValue = getNestedValue(resolvedSeg, "source");
+  if (sourceValue) {
+    sourceClips = await getClipsForSource(sourceValue);
+  }
+
+  // Render property fields
+  editorFields.innerHTML = "";
+  let lastGroup = null;
+
+  for (const prop of schema) {
+    // Check condition
+    if (prop.condition && !prop.condition(resolvedSeg)) continue;
+
+    // Group header
+    if (prop.group && prop.group !== lastGroup) {
+      lastGroup = prop.group;
+      const header = document.createElement("div");
+      header.className = "prop-group-header";
+      header.textContent = prop.group;
+      editorFields.appendChild(header);
+    } else if (!prop.group && lastGroup) {
+      lastGroup = null;
+    }
+
+    const row = document.createElement("div");
+    row.className = "prop-row";
+
+    const currentValue = getNestedValue(resolvedSeg, prop.key);
+    const rawValue = getNestedValue(rawSeg, prop.key);
+    const templateValue = isTemplate ? getNestedValue(templates[rawSeg.type] || {}, prop.key) : undefined;
+
+    // Determine inheritance state
+    let isInherited = false;
+    let inheritLabel = "";
+    if (isTemplate && rawValue === undefined && templateValue !== undefined) {
+      isInherited = true;
+      inheritLabel = "template";
+    } else if (!isTemplate && (rawValue === undefined || rawValue === prop.default) && currentValue === prop.default) {
+      isInherited = true;
+      inheritLabel = "default";
+    }
+
+    if (isInherited) row.classList.add("prop-inherited");
+
+    // Label
+    const label = document.createElement("label");
+    label.textContent = prop.label;
+    row.appendChild(label);
+
+    // Input control
+    const displayValue = currentValue != null ? currentValue : prop.default;
+
+    if (prop.type === "string") {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = displayValue != null ? String(displayValue) : "";
+      input.addEventListener("change", () => {
+        updateSegmentProperty(index, prop.key, input.value);
+      });
+      row.appendChild(input);
+
+    } else if (prop.type === "number") {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.value = displayValue != null ? displayValue : "";
+      if (prop.min != null) input.min = prop.min;
+      if (prop.max != null) input.max = prop.max;
+      if (prop.step != null) input.step = prop.step;
+      input.addEventListener("change", () => {
+        updateSegmentProperty(index, prop.key, parseFloat(input.value));
+      });
+      row.appendChild(input);
+
+    } else if (prop.type === "color") {
+      const pair = document.createElement("div");
+      pair.className = "prop-color-pair";
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      colorInput.value = displayValue || "#000000";
+      const textInput = document.createElement("input");
+      textInput.type = "text";
+      textInput.value = displayValue || "";
+      colorInput.addEventListener("input", () => {
+        textInput.value = colorInput.value;
+        updateSegmentProperty(index, prop.key, colorInput.value);
+      });
+      textInput.addEventListener("change", () => {
+        colorInput.value = textInput.value;
+        updateSegmentProperty(index, prop.key, textInput.value);
+      });
+      pair.appendChild(colorInput);
+      pair.appendChild(textInput);
+      row.appendChild(pair);
+
+    } else if (prop.type === "dropdown") {
+      const select = document.createElement("select");
+      for (const opt of prop.options) {
+        const option = document.createElement("option");
+        option.value = opt;
+        option.textContent = opt;
+        if (String(displayValue) === opt) option.selected = true;
+        select.appendChild(option);
+      }
+      select.addEventListener("change", () => {
+        updateSegmentProperty(index, prop.key, select.value);
+      });
+      row.appendChild(select);
+
+    } else if (prop.type === "file") {
+      const select = document.createElement("select");
+      const emptyOpt = document.createElement("option");
+      emptyOpt.value = "";
+      emptyOpt.textContent = "-- select file --";
+      select.appendChild(emptyOpt);
+      for (const f of libFiles) {
+        const option = document.createElement("option");
+        option.value = f.name;
+        option.textContent = f.name;
+        if (displayValue === f.name) option.selected = true;
+        select.appendChild(option);
+      }
+      select.addEventListener("change", () => {
+        updateSegmentProperty(index, prop.key, select.value);
+        // Re-render editor to update clip dropdown
+        renderEditorPanel(index);
+      });
+      row.appendChild(select);
+
+    } else if (prop.type === "clip-dropdown") {
+      const select = document.createElement("select");
+      const emptyOpt = document.createElement("option");
+      emptyOpt.value = "";
+      emptyOpt.textContent = "-- manual start/end --";
+      select.appendChild(emptyOpt);
+      for (const c of sourceClips) {
+        const option = document.createElement("option");
+        option.value = c.name;
+        option.textContent = `${c.name} (${formatTime(c.start)} - ${formatTime(c.end)})`;
+        if (displayValue === c.name) option.selected = true;
+        select.appendChild(option);
+      }
+      select.addEventListener("change", () => {
+        if (select.value) {
+          updateSegmentProperty(index, "clip", select.value);
+          // Remove manual start/end when selecting a clip
+          deleteNestedValue(projectData.timeline[index], "start");
+          deleteNestedValue(projectData.timeline[index], "end");
+        } else {
+          deleteNestedValue(projectData.timeline[index], "clip");
+          // Set default start/end
+          setNestedValue(projectData.timeline[index], "start", 0);
+          setNestedValue(projectData.timeline[index], "end", 10);
+        }
+        syncYamlFromData();
+        renderEditorPanel(index);
+      });
+      row.appendChild(select);
+
+    } else if (prop.type === "layers") {
+      // Layers editor — renders as a list of layer cards
+      const layersContainer = document.createElement("div");
+      layersContainer.style.padding = "0 12px 4px";
+
+      const layersValue = getNestedValue(resolvedSeg, prop.key) || [];
+
+      for (let li = 0; li < layersValue.length; li++) {
+        const layer = layersValue[li];
+        const card = document.createElement("div");
+        card.className = "layer-card";
+
+        // Header: layer number, type dropdown, move/delete buttons
+        const header = document.createElement("div");
+        header.className = "layer-card-header";
+
+        const num = document.createElement("span");
+        num.className = "layer-num";
+        num.textContent = `${li + 1}`;
+        header.appendChild(num);
+
+        const typeSelect = document.createElement("select");
+        for (const t of Object.keys(SpliceRack.types)) {
+          if (t === "stack") continue; // prevent recursive stacks
+          const opt = document.createElement("option");
+          opt.value = t;
+          opt.textContent = t;
+          if (layer.type === t) opt.selected = true;
+          typeSelect.appendChild(opt);
+        }
+        typeSelect.addEventListener("change", () => {
+          const newTypeDef = SpliceRack.types[typeSelect.value];
+          if (!newTypeDef) return;
+          const newLayer = newTypeDef.defaults();
+          newLayer.opacity = layer.opacity != null ? layer.opacity : 1;
+          newLayer.delay = layer.delay || 0;
+          layersValue[li] = newLayer;
+          syncYamlFromData();
+          renderEditorPanel(index);
+        });
+        header.appendChild(typeSelect);
+
+        const actions = document.createElement("span");
+        actions.className = "layer-actions";
+        if (li > 0) {
+          const upBtn = document.createElement("button");
+          upBtn.textContent = "\u2191";
+          upBtn.addEventListener("click", () => {
+            [layersValue[li - 1], layersValue[li]] = [layersValue[li], layersValue[li - 1]];
+            syncYamlFromData();
+            renderEditorPanel(index);
+          });
+          actions.appendChild(upBtn);
+        }
+        if (li < layersValue.length - 1) {
+          const downBtn = document.createElement("button");
+          downBtn.textContent = "\u2193";
+          downBtn.addEventListener("click", () => {
+            [layersValue[li], layersValue[li + 1]] = [layersValue[li + 1], layersValue[li]];
+            syncYamlFromData();
+            renderEditorPanel(index);
+          });
+          actions.appendChild(downBtn);
+        }
+        const delBtn = document.createElement("button");
+        delBtn.className = "layer-delete";
+        delBtn.textContent = "\u00D7";
+        delBtn.addEventListener("click", () => {
+          layersValue.splice(li, 1);
+          syncYamlFromData();
+          renderEditorPanel(index);
+        });
+        actions.appendChild(delBtn);
+        header.appendChild(actions);
+        card.appendChild(header);
+
+        // Stack-specific per-layer props: opacity and delay
+        const stackProps = document.createElement("div");
+        stackProps.className = "layer-stack-props";
+
+        const opLabel = document.createElement("label");
+        opLabel.textContent = "Opacity";
+        const opInput = document.createElement("input");
+        opInput.type = "number";
+        opInput.min = "0";
+        opInput.max = "1";
+        opInput.step = "0.1";
+        opInput.value = layer.opacity != null ? layer.opacity : 1;
+        opInput.addEventListener("change", () => {
+          layer.opacity = parseFloat(opInput.value);
+          syncYamlFromData();
+        });
+        stackProps.appendChild(opLabel);
+        stackProps.appendChild(opInput);
+
+        const delayLabel = document.createElement("label");
+        delayLabel.textContent = "Delay";
+        const delayInput = document.createElement("input");
+        delayInput.type = "number";
+        delayInput.min = "0";
+        delayInput.step = "0.1";
+        delayInput.value = layer.delay || 0;
+        delayInput.addEventListener("change", () => {
+          layer.delay = parseFloat(delayInput.value);
+          syncYamlFromData();
+        });
+        stackProps.appendChild(delayLabel);
+        stackProps.appendChild(delayInput);
+
+        card.appendChild(stackProps);
+
+        // Sub-properties from the layer's type schema
+        const layerTypeDef = SpliceRack.types[layer.type];
+        if (layerTypeDef && layerTypeDef.schema) {
+          const subProps = document.createElement("div");
+          subProps.className = "layer-subprops";
+
+          for (const sp of layerTypeDef.schema) {
+            if (sp.condition && !sp.condition(layer)) continue;
+            const subRow = document.createElement("div");
+            subRow.className = "prop-row";
+
+            const subLabel = document.createElement("label");
+            subLabel.textContent = sp.label;
+            subRow.appendChild(subLabel);
+
+            const val = getNestedValue(layer, sp.key);
+            const displayVal = val != null ? val : sp.default;
+
+            if (sp.type === "string") {
+              const input = document.createElement("input");
+              input.type = "text";
+              input.value = displayVal != null ? String(displayVal) : "";
+              input.addEventListener("change", () => {
+                setNestedValue(layer, sp.key, input.value);
+                syncYamlFromData();
+              });
+              subRow.appendChild(input);
+            } else if (sp.type === "number") {
+              const input = document.createElement("input");
+              input.type = "number";
+              input.value = displayVal != null ? displayVal : "";
+              if (sp.min != null) input.min = sp.min;
+              if (sp.max != null) input.max = sp.max;
+              if (sp.step != null) input.step = sp.step;
+              input.addEventListener("change", () => {
+                setNestedValue(layer, sp.key, parseFloat(input.value));
+                syncYamlFromData();
+              });
+              subRow.appendChild(input);
+            } else if (sp.type === "color") {
+              const pair = document.createElement("div");
+              pair.className = "prop-color-pair";
+              const cInput = document.createElement("input");
+              cInput.type = "color";
+              cInput.value = displayVal || "#000000";
+              const tInput = document.createElement("input");
+              tInput.type = "text";
+              tInput.value = displayVal || "";
+              cInput.addEventListener("input", () => {
+                tInput.value = cInput.value;
+                setNestedValue(layer, sp.key, cInput.value);
+                syncYamlFromData();
+              });
+              tInput.addEventListener("change", () => {
+                cInput.value = tInput.value;
+                setNestedValue(layer, sp.key, tInput.value);
+                syncYamlFromData();
+              });
+              pair.appendChild(cInput);
+              pair.appendChild(tInput);
+              subRow.appendChild(pair);
+            } else if (sp.type === "dropdown") {
+              const sel = document.createElement("select");
+              for (const o of sp.options) {
+                const opt = document.createElement("option");
+                opt.value = o;
+                opt.textContent = o;
+                if (String(displayVal) === o) opt.selected = true;
+                sel.appendChild(opt);
+              }
+              sel.addEventListener("change", () => {
+                setNestedValue(layer, sp.key, sel.value);
+                syncYamlFromData();
+                renderEditorPanel(index);
+              });
+              subRow.appendChild(sel);
+            } else if (sp.type === "file") {
+              const sel = document.createElement("select");
+              const eo = document.createElement("option");
+              eo.value = "";
+              eo.textContent = "-- select file --";
+              sel.appendChild(eo);
+              for (const f of libFiles) {
+                const opt = document.createElement("option");
+                opt.value = f.name;
+                opt.textContent = f.name;
+                if (displayVal === f.name) opt.selected = true;
+                sel.appendChild(opt);
+              }
+              sel.addEventListener("change", () => {
+                setNestedValue(layer, sp.key, sel.value);
+                syncYamlFromData();
+                renderEditorPanel(index);
+              });
+              subRow.appendChild(sel);
+            } else if (sp.type === "clip-dropdown") {
+              const sel = document.createElement("select");
+              const eo = document.createElement("option");
+              eo.value = "";
+              eo.textContent = "-- manual start/end --";
+              sel.appendChild(eo);
+              const layerSource = getNestedValue(layer, "source");
+              const layerClips = layerSource ? (clipCache[layerSource] || []) : [];
+              for (const c of layerClips) {
+                const opt = document.createElement("option");
+                opt.value = c.name;
+                opt.textContent = `${c.name} (${formatTime(c.start)} - ${formatTime(c.end)})`;
+                if (displayVal === c.name) opt.selected = true;
+                sel.appendChild(opt);
+              }
+              sel.addEventListener("change", () => {
+                if (sel.value) {
+                  layer.clip = sel.value;
+                  delete layer.start;
+                  delete layer.end;
+                } else {
+                  delete layer.clip;
+                  layer.start = 0;
+                  layer.end = 10;
+                }
+                syncYamlFromData();
+                renderEditorPanel(index);
+              });
+              subRow.appendChild(sel);
+            }
+
+            subProps.appendChild(subRow);
+          }
+          card.appendChild(subProps);
+        }
+
+        layersContainer.appendChild(card);
+      }
+
+      // Add layer button
+      const addBtn = document.createElement("button");
+      addBtn.className = "layers-add-btn";
+      addBtn.textContent = "+ Add Layer";
+      addBtn.addEventListener("click", () => {
+        const defaultType = "caption";
+        const newLayer = SpliceRack.types[defaultType].defaults();
+        newLayer.opacity = 1;
+        newLayer.delay = 0;
+        layersValue.push(newLayer);
+        setNestedValue(projectData.timeline[index], prop.key, layersValue);
+        syncYamlFromData();
+        renderEditorPanel(index);
+      });
+      layersContainer.appendChild(addBtn);
+
+      // Layers take the full width — skip the normal row layout
+      editorFields.appendChild(layersContainer);
+      continue;
+    }
+
+    // Inherit label or revert button
+    if (isInherited) {
+      const lbl = document.createElement("span");
+      lbl.className = "prop-inherit-label";
+      lbl.textContent = inheritLabel;
+      row.appendChild(lbl);
+    } else if (isTemplate || (rawValue !== undefined && rawValue !== prop.default)) {
+      const revertBtn = document.createElement("button");
+      revertBtn.className = "prop-revert";
+      revertBtn.textContent = "\u21A9";
+      revertBtn.title = isTemplate ? "Revert to template value" : "Revert to default";
+      revertBtn.addEventListener("click", () => {
+        if (isTemplate) {
+          deleteNestedValue(projectData.timeline[index], prop.key);
+        } else {
+          setNestedValue(projectData.timeline[index], prop.key, prop.default);
+        }
+        syncYamlFromData();
+        renderEditorPanel(index);
+      });
+      row.appendChild(revertBtn);
+    }
+
+    editorFields.appendChild(row);
+  }
+}
+
+function updateSegmentProperty(index, key, value) {
+  if (!projectData || !projectData.timeline[index]) return;
+  setNestedValue(projectData.timeline[index], key, value);
+  syncYamlFromData();
 }
 
 // --- Timeline rendering ---
@@ -464,7 +1104,7 @@ async function renderTimeline() {
 
   resolved.forEach((seg, index) => {
     const rawSeg = projectData.timeline[index]; // original (may have template name)
-    const templateName = BUILTIN_TYPES.has(rawSeg.type) ? null : rawSeg.type;
+    const templateName = isKnownType(rawSeg.type) ? null : rawSeg.type;
 
     const div = document.createElement("div");
     div.className = "timeline-segment";
@@ -499,26 +1139,11 @@ async function renderTimeline() {
     const detail = document.createElement("div");
     detail.className = "seg-detail";
 
-    if (seg.type === "caption") {
-      title.textContent = seg.text || "(empty caption)";
-      detail.textContent = `${seg.duration || 3}s`;
-    } else if (seg.type === "clip") {
-      title.textContent = seg.clip || `${seg.source} [${seg.start}-${seg.end}]`;
-      const parts = [seg.source || ""];
-      if (clipTimes) {
-        const dur = clipTimes.end - clipTimes.start;
-        const speed = seg.speed || 1;
-        parts.push(`${formatTime(dur / speed)}`);
-      }
-      if (seg.speed && seg.speed !== 1) parts.push(`@ ${seg.speed}x`);
-      detail.textContent = parts.join("  ");
-    } else if (seg.type === "image") {
-      title.textContent = seg.source || "(no source)";
-      detail.textContent = `${seg.duration || 5}s`;
-      if (seg.animation) detail.textContent += ` [${seg.animation.type}]`;
-    } else if (seg.type === "pause") {
-      title.textContent = "Pause";
-      detail.textContent = `${seg.duration || 1}s`;
+    const typeDef = SpliceRack.types[seg.type];
+    if (typeDef && typeDef.timelineDisplay) {
+      const display = typeDef.timelineDisplay(seg, clipTimes);
+      title.textContent = display.title;
+      detail.textContent = display.detail;
     } else {
       title.textContent = seg.type;
     }
@@ -564,11 +1189,12 @@ async function renderTimeline() {
     div.appendChild(info);
     div.appendChild(actions);
 
-    // Click to select corresponding YAML
+    // Click to select and open editor
     div.addEventListener("click", () => {
       $$(".timeline-segment.selected").forEach((s) => s.classList.remove("selected"));
       div.classList.add("selected");
       selectYamlSegment(index);
+      renderEditorPanel(index);
     });
 
     // Drag and drop reordering
@@ -642,12 +1268,51 @@ function moveSegment(from, to) {
   syncYamlFromData();
 }
 
+// Serialize a value for YAML output
+function yamlValue(v, indent) {
+  if (v == null) return "null";
+  if (typeof v === "string") return `"${v.replace(/"/g, '\\"')}"`;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) {
+    if (v.length === 0) return "[]";
+    const lines = [];
+    for (const item of v) {
+      if (typeof item === "object" && item !== null) {
+        const entries = serializeObject(item, indent + "    ");
+        lines.push(`${indent}  - ${entries[0].trimStart()}`);
+        for (let i = 1; i < entries.length; i++) lines.push(entries[i]);
+      } else {
+        lines.push(`${indent}  - ${yamlValue(item, indent + "  ")}`);
+      }
+    }
+    return "\n" + lines.join("\n");
+  }
+  if (typeof v === "object") {
+    const entries = serializeObject(v, indent + "  ");
+    return "\n" + entries.join("\n");
+  }
+  return String(v);
+}
+
+function serializeObject(obj, indent) {
+  const lines = [];
+  for (const [k, val] of Object.entries(obj)) {
+    if (val === undefined) continue;
+    const rendered = yamlValue(val, indent);
+    if (rendered.startsWith("\n")) {
+      lines.push(`${indent}${k}:${rendered}`);
+    } else {
+      lines.push(`${indent}${k}: ${rendered}`);
+    }
+  }
+  return lines;
+}
+
 // Update YAML text from the in-memory data and save
 function syncYamlFromData() {
-  // Build YAML manually for a nice readable format
   const lines = [];
 
-  // Preserve output section from current YAML or use defaults
+  // Output section
   const output = projectData.output || {};
   lines.push("output:");
   lines.push(`  width: ${output.width || 1920}`);
@@ -655,157 +1320,76 @@ function syncYamlFromData() {
   lines.push(`  fps: ${output.fps || 30}`);
   lines.push(`  background: "${output.background || "#1a1a2e"}"`);
   lines.push("");
+
+  // Templates section (preserve existing templates)
+  const templates = projectData.templates;
+  if (templates && Object.keys(templates).length > 0) {
+    lines.push("templates:");
+    for (const [name, tmpl] of Object.entries(templates)) {
+      lines.push(`  ${name}:`);
+      for (const line of serializeObject(tmpl, "    ")) {
+        lines.push(line);
+      }
+      lines.push("");
+    }
+  }
+
   lines.push("timeline:");
 
   for (const seg of projectData.timeline) {
+    const isTemplate = !isKnownType(seg.type);
     lines.push(`  - type: ${seg.type}`);
-    if (seg.type === "caption") {
-      lines.push(`    text: "${(seg.text || "").replace(/"/g, '\\"')}"`);
-      lines.push(`    duration: ${seg.duration || 3}`);
-      if (seg.style) {
-        lines.push("    style:");
-        for (const [k, v] of Object.entries(seg.style)) {
-          lines.push(`      ${k}: ${typeof v === "string" ? `"${v}"` : v}`);
-        }
-      }
-    } else if (seg.type === "clip") {
-      lines.push(`    source: ${seg.source}`);
-      if (seg.clip) lines.push(`    clip: ${seg.clip}`);
-      if (seg.start != null) lines.push(`    start: ${seg.start}`);
-      if (seg.end != null) lines.push(`    end: ${seg.end}`);
-      if (seg.speed && seg.speed !== 1) lines.push(`    speed: ${seg.speed}`);
-      if (seg.overlay) {
-        lines.push("    overlay:");
-        for (const ov of seg.overlay) {
-          lines.push(`      - type: ${ov.type}`);
-          if (ov.text) lines.push(`        text: "${ov.text.replace(/"/g, '\\"')}"`);
-          if (ov.style) {
-            lines.push("        style:");
-            for (const [k, v] of Object.entries(ov.style)) {
-              lines.push(`          ${k}: ${typeof v === "string" ? `"${v}"` : v}`);
-            }
-          }
-        }
-      }
-    } else if (seg.type === "image") {
-      lines.push(`    source: ${seg.source}`);
-      lines.push(`    duration: ${seg.duration || 5}`);
-      if (seg.animation) {
-        lines.push("    animation:");
-        lines.push(`      type: ${seg.animation.type}`);
-        if (seg.animation.from) {
-          lines.push(`      from: { x: ${seg.animation.from.x || 0}, y: ${seg.animation.from.y || 0}, scale: ${seg.animation.from.scale || 1} }`);
-        }
-        if (seg.animation.to) {
-          lines.push(`      to: { x: ${seg.animation.to.x || 0}, y: ${seg.animation.to.y || 0}, scale: ${seg.animation.to.scale || 1} }`);
-        }
-      }
-    } else if (seg.type === "pause") {
-      lines.push(`    duration: ${seg.duration || 1}`);
-      if (seg.background) lines.push(`    background: "${seg.background}"`);
-    }
 
-    // Common properties
-    if (seg["fade-in"]) lines.push(`    fade-in: ${seg["fade-in"]}`);
-    if (seg["fade-out"]) lines.push(`    fade-out: ${seg["fade-out"]}`);
+    if (isTemplate) {
+      // For template segments, only serialize overridden properties
+      for (const [k, v] of Object.entries(seg)) {
+        if (k === "type") continue;
+        if (v === undefined) continue;
+        const rendered = yamlValue(v, "    ");
+        if (rendered.startsWith("\n")) {
+          lines.push(`    ${k}:${rendered}`);
+        } else {
+          lines.push(`    ${k}: ${rendered}`);
+        }
+      }
+    } else {
+      const typeDef = SpliceRack.types[seg.type];
+      if (typeDef && typeDef.serialize) {
+        typeDef.serialize(seg, lines);
+      }
+    }
 
     lines.push("");
   }
 
   yamlEditor.value = lines.join("\n");
-  saveYaml();
+  // Save without re-parsing — our in-memory projectData is the source of truth.
+  // Re-render the timeline directly from the in-memory data.
+  saveYamlQuiet();
+  renderTimeline();
 }
 
-// --- Add segment buttons ---
-$("#btn-add-caption").addEventListener("click", () => {
+// --- Add segment ---
+// Populate the add-segment type dropdown from the registry
+const addSegmentType = $("#add-segment-type");
+for (const t of Object.keys(SpliceRack.types)) {
+  const opt = document.createElement("option");
+  opt.value = t;
+  opt.textContent = t;
+  addSegmentType.appendChild(opt);
+}
+
+$("#btn-add-segment").addEventListener("click", () => {
   if (!projectData) return alert("Open or create a project first");
-  projectData.timeline.push({
-    type: "caption",
-    text: "New caption",
-    duration: 3,
-    style: {
-      "font-size": 48,
-      color: "#ffffff",
-      background: "#1a1a2e",
-      align: "center",
-      valign: "middle",
-    },
-    "fade-in": 0.5,
-    "fade-out": 0.5,
-  });
+  const typeName = addSegmentType.value;
+  const typeDef = SpliceRack.types[typeName];
+  if (!typeDef) return;
+  const newSeg = typeDef.defaults();
+  projectData.timeline.push(newSeg);
   syncYamlFromData();
-});
-
-$("#btn-add-clip").addEventListener("click", async () => {
-  if (!projectData) return alert("Open or create a project first");
-
-  // Get available library files and their clips
-  let libraryFiles;
-  try {
-    const res = await fetch("/api/library");
-    libraryFiles = (await res.json()).files;
-  } catch {
-    return alert("Failed to load library");
-  }
-
-  if (libraryFiles.length === 0) return alert("No videos in library. Add some in the Library tab.");
-
-  const source = prompt(
-    "Source video file:\n" + libraryFiles.map((f) => `  ${f.name}`).join("\n")
-  );
-  if (!source) return;
-
-  // Check for clips
-  let clipName = null;
-  try {
-    const res = await fetch(`/api/clips/${encodeURIComponent(source)}`);
-    const data = await res.json();
-    if (data.clips && data.clips.length > 0) {
-      clipName = prompt(
-        "Clip name (or leave empty for manual start/end):\n" +
-          data.clips.map((c) => `  ${c.name} (${formatTime(c.start)} -> ${formatTime(c.end)})`).join("\n")
-      );
-    }
-  } catch {
-    // No clips, that's fine
-  }
-
-  const seg = { type: "clip", source };
-  if (clipName) {
-    seg.clip = clipName;
-  } else {
-    const start = prompt("Start time (seconds):", "0");
-    const end = prompt("End time (seconds):", "10");
-    seg.start = parseFloat(start) || 0;
-    seg.end = parseFloat(end) || 10;
-  }
-
-  projectData.timeline.push(seg);
-  syncYamlFromData();
-});
-
-$("#btn-add-pause").addEventListener("click", () => {
-  if (!projectData) return alert("Open or create a project first");
-  projectData.timeline.push({
-    type: "pause",
-    duration: 1.5,
-    background: "#1a1a2e",
-  });
-  syncYamlFromData();
-});
-
-$("#btn-add-image").addEventListener("click", () => {
-  if (!projectData) return alert("Open or create a project first");
-  const source = prompt("Image filename (must be in library/ folder):");
-  if (!source) return;
-  projectData.timeline.push({
-    type: "image",
-    source,
-    duration: 5,
-    "fade-in": 0.5,
-    "fade-out": 0.5,
-  });
-  syncYamlFromData();
+  // Open editor for the new segment
+  const newIndex = projectData.timeline.length - 1;
+  renderEditorPanel(newIndex);
 });
 
 // --- Render ---
@@ -905,6 +1489,7 @@ function connectWS() {
   ws.addEventListener("message", (e) => {
     const msg = JSON.parse(e.data);
     if (msg.type === "library-updated") {
+      libraryFilesCache = null;
       loadLibrary();
     } else if (msg.type === "clips-updated") {
       delete clipCache[msg.filename];
@@ -918,7 +1503,8 @@ function connectWS() {
     } else if (msg.type === "render-progress") {
       const pct = ((msg.segment + 1) / msg.total) * 100;
       renderProgressFill.style.width = `${pct}%`;
-      renderStatusText.textContent = `Rendering segment ${msg.segment + 1}/${msg.total} (${msg.segmentType})...`;
+      const cacheNote = msg.cached ? " [cached]" : "";
+      renderStatusText.textContent = `Rendering segment ${msg.segment + 1}/${msg.total} (${msg.segmentType})${cacheNote}...`;
     } else if (msg.type === "render-complete") {
       renderProgressFill.style.width = "100%";
       renderStatusText.textContent = "Render complete!";

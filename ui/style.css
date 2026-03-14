@@ -502,10 +502,7 @@ header h1 {
   justify-content: center;
 }
 
-.seg-type-caption { background: #2d3a87; color: #8ab4f8; }
-.seg-type-clip { background: #1a5c3a; color: #81c995; }
-.seg-type-pause { background: #5c4a1a; color: #f0c674; }
-.seg-type-image { background: #5c1a4a; color: #f0a0d0; }
+/* Badge colors are served from /api/types.css */
 
 .seg-thumbnail {
   width: 96px;
@@ -514,6 +511,7 @@ header h1 {
   border-right: 1px solid #0f3460;
   flex-shrink: 0;
   background: #000;
+  padding: 0 10px;
 }
 
 .seg-info {
@@ -563,6 +561,181 @@ header h1 {
 .seg-actions button.seg-delete:hover {
   background: #e94560;
   border-color: #e94560;
+}
+
+/* Segment property editor */
+.segment-editor {
+  border-top: 1px solid #0f3460;
+  background: #1a1a2e;
+  max-height: 320px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.segment-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.segment-editor-header h3 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #a0a0b0;
+}
+
+.editor-close {
+  background: none;
+  border: none;
+  color: #808090;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.editor-close:hover {
+  color: #e94560;
+}
+
+.segment-editor-type-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #0f3460;
+}
+
+.segment-editor-type-row label {
+  font-size: 12px;
+  color: #808090;
+  min-width: 36px;
+}
+
+.segment-editor-type-row select {
+  flex: 1;
+  background: #111128;
+  border: 1px solid #0f3460;
+  color: #e0e0e0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.editor-template-info {
+  background: #2d3a87;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: #8ab4f8;
+}
+
+.editor-fields {
+  padding: 4px 0;
+}
+
+.prop-group-header {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #808090;
+  letter-spacing: 0.5px;
+  padding: 8px 12px 2px;
+}
+
+.prop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  font-size: 12px;
+}
+
+.prop-row:hover {
+  background: rgba(15, 52, 96, 0.3);
+}
+
+.prop-row label {
+  min-width: 100px;
+  color: #a0a0b0;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.prop-row input[type="text"],
+.prop-row input[type="number"],
+.prop-row select {
+  flex: 1;
+  background: #111128;
+  border: 1px solid #0f3460;
+  color: #e0e0e0;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.prop-row input[type="color"] {
+  width: 28px;
+  height: 24px;
+  border: 1px solid #0f3460;
+  border-radius: 3px;
+  background: #111128;
+  cursor: pointer;
+  padding: 1px;
+  flex-shrink: 0;
+}
+
+.prop-color-pair {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.prop-color-pair input[type="text"] {
+  flex: 1;
+}
+
+.prop-row.prop-inherited input,
+.prop-row.prop-inherited select {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.prop-row .prop-inherit-label {
+  font-size: 9px;
+  color: #606070;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.prop-revert {
+  background: none;
+  border: 1px solid #0f3460;
+  color: #a0a0b0;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.prop-revert:hover {
+  background: #e94560;
+  border-color: #e94560;
+  color: #fff;
 }
 
 /* Render status */

@@ -8,7 +8,11 @@ import { fileURLToPath } from "url";
 import { dirname } from "path";
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
+import { createHash } from "crypto";
+import { copyFileSync } from "fs";
 import yaml from "js-yaml";
+import { loadTypes } from "./types/index.js";
+import { buildFadeFilter } from "./types/_helpers.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -29,6 +33,37 @@ const wss = new WebSocketServer({ server });
 
 app.use(express.json());
 app.use(express.static(join(__dirname, "ui")));
+
+// Serve bundled type UI scripts and styles (concatenated from types/*/ui.js and ui.css)
+const TYPES_DIR = join(__dirname, "types");
+
+function getTypeDirs() {
+  return readdirSync(TYPES_DIR)
+    .filter(f => !f.startsWith("_") && !f.startsWith(".") && !f.endsWith(".js"))
+    .filter(f => statSync(join(TYPES_DIR, f)).isDirectory());
+}
+
+app.get("/api/types.js", (req, res) => {
+  let bundle = "";
+  for (const dir of getTypeDirs()) {
+    const uiPath = join(TYPES_DIR, dir, "ui.js");
+    if (existsSync(uiPath)) {
+      bundle += readFileSync(uiPath, "utf-8") + "\n";
+    }
+  }
+  res.type("application/javascript").send(bundle);
+});
+
+app.get("/api/types.css", (req, res) => {
+  let bundle = "";
+  for (const dir of getTypeDirs()) {
+    const cssPath = join(TYPES_DIR, dir, "ui.css");
+    if (existsSync(cssPath)) {
+      bundle += readFileSync(cssPath, "utf-8") + "\n";
+    }
+  }
+  res.type("text/css").send(bundle);
+});
 
 // Serve library video files
 app.use("/library", express.static(LIBRARY_DIR));
@@ -158,6 +193,49 @@ if (!existsSync(OUTPUT_DIR)) {
   mkdirSync(OUTPUT_DIR, { recursive: true });
 }
 
+const CACHE_DIR = join(PROJECT_DIR, "cache");
+if (!existsSync(CACHE_DIR)) {
+  mkdirSync(CACHE_DIR, { recursive: true });
+}
+
+// Content-addressable render cache: hash segment settings → cached .mp4
+// Use a replacer function that sorts keys at every nesting level for deterministic output.
+function segmentHash(seg) {
+  const json = JSON.stringify(seg, (key, value) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const sorted = {};
+      for (const k of Object.keys(value).sort()) sorted[k] = value[k];
+      return sorted;
+    }
+    return value;
+  });
+  return createHash("sha256").update(json).digest("hex").slice(0, 16);
+}
+
+function getCachePath(hash) {
+  return join(CACHE_DIR, `${hash}.mp4`);
+}
+
+// Render a segment, using cache if available. Returns the output file path.
+async function renderCached(seg, outFile, ctx) {
+  const hash = segmentHash(seg);
+  const cached = getCachePath(hash);
+
+  if (existsSync(cached)) {
+    copyFileSync(cached, outFile);
+    return { hit: true };
+  }
+
+  const renderer = ctx.rendererRegistry.get(seg.type);
+  if (!renderer) throw new Error(`Unknown segment type: ${seg.type}`);
+
+  await renderer.render(seg, outFile, ctx);
+
+  // Cache the result
+  try { copyFileSync(outFile, cached); } catch {}
+  return { hit: false };
+}
+
 // List YAML files in project root
 app.get("/api/projects", (req, res) => {
   const files = readdirSync(PROJECT_DIR)
@@ -205,8 +283,9 @@ app.put("/api/project/:filename", (req, res) => {
   res.json({ ok: true });
 });
 
-// Built-in segment types
-const BUILTIN_TYPES = new Set(["caption", "clip", "image", "pause"]);
+// Load renderer plugins and derive built-in types from the registry
+const rendererRegistry = await loadTypes();
+const BUILTIN_TYPES = new Set(rendererRegistry.keys());
 
 // Resolve templates: if a segment's type is not a built-in, look it up in templates
 // and deep-merge the template defaults with the segment's own properties.
@@ -299,6 +378,37 @@ app.post("/api/render/:filename", async (req, res) => {
   const tempFiles = [];
   const errors = [];
 
+  // Build render context shared by all renderer plugins
+  // On Windows, colons in font paths (e.g. C:\Windows\Fonts) can't be reliably escaped
+  // in FFmpeg filter strings passed via execFile. We escape the colon with \: and use
+  // -filter_script:v (which reads the filter from a file) to avoid command-line mangling.
+  const systemFontDir = process.platform === "win32"
+    ? (process.env.SYSTEMROOT || "C:\\Windows").replace(/\\/g, "/") + "/Fonts"
+    : process.platform === "darwin"
+      ? "/System/Library/Fonts"
+      : "/usr/share/fonts/truetype/dejavu";
+  const defaultFontFile = process.platform === "win32"
+    ? "arial.ttf"
+    : process.platform === "darwin"
+      ? "Helvetica.ttc"
+      : "DejaVuSans.ttf";
+  // Escape colons for FFmpeg filter syntax (used inside -filter_script files)
+  const defaultFont = (systemFontDir + "/" + defaultFontFile).replace(/:/g, "\\:");
+
+  let filterScriptCounter = 0;
+  function writeFilterScript(filter) {
+    const p = join(OUTPUT_DIR, `_filter_${filterScriptCounter++}.txt`);
+    writeFileSync(p, filter);
+    return p;
+  }
+
+  const ctx = {
+    width, height, fps, defaultBg: bg, defaultFont,
+    buildFadeFilter, resolveClip, readClips, writeFilterScript,
+    LIBRARY_DIR, execFileAsync, existsSync, join,
+    rendererRegistry, OUTPUT_DIR, renderCached,
+  };
+
   broadcast({ type: "render-started", filename: req.params.filename });
   activeRender = { filename: req.params.filename, progress: 0, total: timeline.length };
   res.json({ ok: true, output: outputFile });
@@ -318,17 +428,14 @@ app.post("/api/render/:filename", async (req, res) => {
       });
 
       try {
-        if (seg.type === "caption") {
-          await renderCaption(seg, tempFile, width, height, fps, bg);
-        } else if (seg.type === "clip") {
-          await renderClipSegment(seg, tempFile, width, height, fps);
-        } else if (seg.type === "image") {
-          await renderImage(seg, tempFile, width, height, fps);
-        } else if (seg.type === "pause") {
-          await renderPause(seg, tempFile, width, height, fps, bg);
-        } else {
-          errors.push(`Unknown segment type: ${seg.type}`);
-        }
+        const { hit } = await renderCached(seg, tempFile, ctx);
+        broadcast({
+          type: "render-progress",
+          segment: i,
+          total: timeline.length,
+          segmentType: seg.type,
+          cached: hit,
+        });
       } catch (err) {
         errors.push(`Segment ${i} (${seg.type}): ${err.message}`);
       }
@@ -359,6 +466,11 @@ app.post("/api/render/:filename", async (req, res) => {
       if (existsSync(f)) unlinkSync(f);
     }
     if (existsSync(concatList)) unlinkSync(concatList);
+    // Clean up filter script files
+    for (let j = 0; j < filterScriptCounter; j++) {
+      const p = join(OUTPUT_DIR, `_filter_${j}.txt`);
+      if (existsSync(p)) unlinkSync(p);
+    }
 
     broadcast({ type: "render-complete", output: outputFile, filename: outputFilename });
   } catch (err) {
@@ -370,6 +482,27 @@ app.post("/api/render/:filename", async (req, res) => {
 
 app.get("/api/render/status", (req, res) => {
   res.json({ active: activeRender });
+});
+
+// --- Render cache management ---
+app.get("/api/cache", (req, res) => {
+  try {
+    const files = readdirSync(CACHE_DIR).filter(f => f.endsWith(".mp4"));
+    const totalSize = files.reduce((sum, f) => sum + statSync(join(CACHE_DIR, f)).size, 0);
+    res.json({ entries: files.length, totalSizeMB: (totalSize / 1024 / 1024).toFixed(1) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/cache", (req, res) => {
+  try {
+    const files = readdirSync(CACHE_DIR).filter(f => f.endsWith(".mp4"));
+    for (const f of files) unlinkSync(join(CACHE_DIR, f));
+    res.json({ ok: true, cleared: files.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- Output management ---
@@ -404,193 +537,6 @@ app.delete("/api/outputs/:filename", (req, res) => {
 
 // Serve rendered output files
 app.use("/output", express.static(OUTPUT_DIR));
-
-// --- Segment renderers ---
-
-async function renderCaption(seg, outFile, width, height, fps, defaultBg) {
-  const duration = seg.duration || 3;
-  const style = seg.style || {};
-  const fontSize = style["font-size"] || 48;
-  const color = (style.color || "#ffffff").replace("#", "");
-  const bgColor = (style.background || defaultBg).replace("#", "");
-  const align = style.align || "center";
-  const valign = style.valign || "middle";
-
-  // Map align/valign to FFmpeg drawtext x/y expressions
-  const xExpr =
-    align === "left" ? "50" : align === "right" ? "(w-text_w-50)" : "((w-text_w)/2)";
-  const yExpr =
-    valign === "top" ? "50" : valign === "bottom" ? "(h-text_h-50)" : "((h-text_h)/2)";
-
-  // Escape text for FFmpeg drawtext
-  const escapedText = seg.text
-    .replace(/\\/g, "\\\\\\\\")
-    .replace(/'/g, "\u2019")
-    .replace(/:/g, "\\:")
-    .replace(/%/g, "%%");
-
-  const fadeFilter = buildFadeFilter(seg, duration);
-
-  await execFileAsync("ffmpeg", [
-    "-y",
-    "-f", "lavfi",
-    "-i", `color=c=0x${bgColor}:s=${width}x${height}:d=${duration}:r=${fps}`,
-    "-vf",
-    `drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=0x${color}:x=${xExpr}:y=${yExpr}${fadeFilter}`,
-    "-c:v", "libx264",
-    "-preset", "fast",
-    "-pix_fmt", "yuv420p",
-    "-t", String(duration),
-    outFile,
-  ], { maxBuffer: 50 * 1024 * 1024 });
-}
-
-async function renderClipSegment(seg, outFile, width, height, fps) {
-  const { start, end } = resolveClip(seg);
-  const duration = end - start;
-  const speed = seg.speed || 1.0;
-  const sourcePath = join(LIBRARY_DIR, seg.source);
-
-  if (!existsSync(sourcePath)) {
-    throw new Error(`Source file not found: ${seg.source}`);
-  }
-
-  const fadeFilter = buildFadeFilter(seg, duration / speed);
-
-  // Build overlay filters if present
-  let overlayFilters = "";
-  if (seg.overlay && seg.overlay.length > 0) {
-    for (const ov of seg.overlay) {
-      if (ov.type === "caption") {
-        const style = ov.style || {};
-        const fontSize = style["font-size"] || 36;
-        const color = (style.color || "#ffffff").replace("#", "");
-        const ovAlign = style.align || "center";
-        const ovValign = style.valign || "bottom";
-        const xExpr =
-          ovAlign === "left" ? "50" : ovAlign === "right" ? "(w-text_w-50)" : "((w-text_w)/2)";
-        const yExpr =
-          ovValign === "top" ? "50" : ovValign === "bottom" ? "(h-text_h-50)" : "((h-text_h)/2)";
-        const escapedText = ov.text
-          .replace(/\\/g, "\\\\\\\\")
-          .replace(/'/g, "\u2019")
-          .replace(/:/g, "\\:")
-          .replace(/%/g, "%%");
-        overlayFilters += `,drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=0x${color}:x=${xExpr}:y=${yExpr}`;
-      }
-    }
-  }
-
-  const vfParts = [];
-  vfParts.push(`scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`);
-  if (speed !== 1.0) {
-    vfParts.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
-  }
-  if (overlayFilters) {
-    vfParts.push(overlayFilters.slice(1)); // remove leading comma
-  }
-  if (fadeFilter) {
-    vfParts.push(fadeFilter.slice(1)); // remove leading comma
-  }
-
-  const args = [
-    "-y",
-    "-ss", String(start),
-    "-to", String(end),
-    "-i", sourcePath,
-    "-vf", vfParts.join(","),
-    "-c:v", "libx264",
-    "-preset", "fast",
-    "-pix_fmt", "yuv420p",
-    "-an",
-    "-r", String(fps),
-    outFile,
-  ];
-
-  // If there's audio and no speed change, include it
-  if (speed === 1.0 && !seg.audio) {
-    args.splice(args.indexOf("-an"), 1);
-    args.splice(args.indexOf(outFile), 0, "-c:a", "aac", "-b:a", "128k");
-  }
-
-  await execFileAsync("ffmpeg", args, { maxBuffer: 50 * 1024 * 1024 });
-}
-
-async function renderImage(seg, outFile, width, height, fps) {
-  const duration = seg.duration || 5;
-  const sourcePath = join(LIBRARY_DIR, seg.source);
-
-  if (!existsSync(sourcePath)) {
-    throw new Error(`Source file not found: ${seg.source}`);
-  }
-
-  const fadeFilter = buildFadeFilter(seg, duration);
-
-  // Basic: scale and pad image, loop for duration
-  // Animation support for pan/zoom
-  let vf;
-  if (seg.animation) {
-    const anim = seg.animation;
-    if (anim.type === "ken-burns" || anim.type === "zoom" || anim.type === "pan") {
-      const from = anim.from || { x: 0, y: 0, scale: 1.0 };
-      const to = anim.to || { x: 0, y: 0, scale: 1.2 };
-      // Use zoompan filter
-      const zStart = from.scale || 1.0;
-      const zEnd = to.scale || 1.2;
-      const totalFrames = duration * fps;
-      const xStart = from.x || 0;
-      const xEnd = to.x || 0;
-      const yStart = from.y || 0;
-      const yEnd = to.y || 0;
-      vf = `zoompan=z='${zStart}+(${zEnd}-${zStart})*on/${totalFrames}':x='${xStart}+(${xEnd}-${xStart})*on/${totalFrames}':y='${yStart}+(${yEnd}-${yStart})*on/${totalFrames}':d=${totalFrames}:s=${width}x${height}:fps=${fps}${fadeFilter}`;
-    } else {
-      vf = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2${fadeFilter}`;
-    }
-  } else {
-    vf = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2${fadeFilter}`;
-  }
-
-  await execFileAsync("ffmpeg", [
-    "-y",
-    "-loop", "1",
-    "-i", sourcePath,
-    "-vf", vf,
-    "-c:v", "libx264",
-    "-preset", "fast",
-    "-pix_fmt", "yuv420p",
-    "-t", String(duration),
-    "-r", String(fps),
-    outFile,
-  ], { maxBuffer: 50 * 1024 * 1024 });
-}
-
-async function renderPause(seg, outFile, width, height, fps, defaultBg) {
-  const duration = seg.duration || 1;
-  const bgColor = (seg.background || defaultBg).replace("#", "");
-
-  await execFileAsync("ffmpeg", [
-    "-y",
-    "-f", "lavfi",
-    "-i", `color=c=0x${bgColor}:s=${width}x${height}:d=${duration}:r=${fps}`,
-    "-c:v", "libx264",
-    "-preset", "fast",
-    "-pix_fmt", "yuv420p",
-    "-t", String(duration),
-    outFile,
-  ], { maxBuffer: 50 * 1024 * 1024 });
-}
-
-function buildFadeFilter(seg, duration) {
-  const parts = [];
-  if (seg["fade-in"]) {
-    parts.push(`fade=t=in:st=0:d=${seg["fade-in"]}`);
-  }
-  if (seg["fade-out"]) {
-    const fadeStart = duration - seg["fade-out"];
-    parts.push(`fade=t=out:st=${fadeStart.toFixed(3)}:d=${seg["fade-out"]}`);
-  }
-  return parts.length ? "," + parts.join(",") : "";
-}
 
 // WebSocket for live updates
 function broadcast(msg) {
