@@ -11,11 +11,18 @@ import { promisify } from "util";
 import { createHash } from "crypto";
 import { copyFileSync } from "fs";
 import yaml from "js-yaml";
-import { loadTypes } from "./types/index.js";
-import { buildFadeFilter, buildKeyframeFilter } from "./types/_helpers.js";
-import { getVoices, synthesize } from "./services/tts.js";
+import { loadTypes } from "./types/index.ts";
+import { buildFadeFilter, buildKeyframeFilter } from "./types/_helpers.ts";
+import { getVoices, synthesize } from "./services/tts.ts";
+import { deterministicHash } from "./shared/hash.ts";
+import { deepMerge } from "./shared/deep-merge.ts";
+import tsBlankSpace from "ts-blank-space";
 
 const execFileAsync = promisify(execFile);
+
+function stripTypes(src: string): string {
+  return tsBlankSpace(src);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,9 +45,20 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
 app.use(express.json());
+
+// Serve .ts UI files with type stripping (before static middleware)
+app.get("/app.js", (req, res) => {
+  const src = readFileSync(join(__dirname, "ui", "app.ts"), "utf-8");
+  res.type("application/javascript").send(stripTypes(src));
+});
+app.get("/type-registry.js", (req, res) => {
+  const src = readFileSync(join(__dirname, "ui", "type-registry.ts"), "utf-8");
+  res.type("application/javascript").send(stripTypes(src));
+});
+
 app.use(express.static(join(__dirname, "ui")));
 
-// Serve bundled type UI scripts and styles (concatenated from types/*/ui.js and ui.css)
+// Serve bundled type UI scripts and styles
 const TYPES_DIR = join(__dirname, "types");
 
 function getTypeDirs() {
@@ -49,12 +67,27 @@ function getTypeDirs() {
     .filter(f => statSync(join(TYPES_DIR, f)).isDirectory());
 }
 
+// --- TypeScript type stripping for browser-served files ---
+
+// Serve shared utilities as browser-compatible JS
+app.get("/api/shared.js", (req, res) => {
+  const deepMergeSrc = readFileSync(join(__dirname, "shared", "deep-merge.ts"), "utf-8");
+  const body = stripTypes(deepMergeSrc)
+    .replace(/^export /gm, "")
+    .replace(/^import .*/gm, "");
+  res.type("application/javascript").send(`// Shared utilities\n${body}\nSpliceRack.deepMerge = deepMerge;\n`);
+});
+
 app.get("/api/types.js", (req, res) => {
   let bundle = "";
   for (const dir of getTypeDirs()) {
-    const uiPath = join(TYPES_DIR, dir, "ui.js");
-    if (existsSync(uiPath)) {
-      bundle += readFileSync(uiPath, "utf-8") + "\n";
+    // Prefer .ts, fall back to .js
+    const tsPath = join(TYPES_DIR, dir, "ui.ts");
+    const jsPath = join(TYPES_DIR, dir, "ui.js");
+    if (existsSync(tsPath)) {
+      bundle += stripTypes(readFileSync(tsPath, "utf-8")) + "\n";
+    } else if (existsSync(jsPath)) {
+      bundle += readFileSync(jsPath, "utf-8") + "\n";
     }
   }
   res.type("application/javascript").send(bundle);
@@ -84,7 +117,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 app.post("/api/upload", upload.array("files"), (req, res) => {
-  const uploaded = req.files.map((f) => f.originalname);
+  const uploaded = (req.files as Express.Multer.File[]).map((f: Express.Multer.File) => f.originalname);
   broadcast({ type: "library-updated" });
   res.json({ uploaded });
 });
@@ -118,7 +151,7 @@ app.get("/api/library", async (req, res) => {
       });
     res.json({ files });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -138,7 +171,7 @@ app.get("/api/probe/:filename", async (req, res) => {
     ]);
     res.json(JSON.parse(stdout));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -166,7 +199,7 @@ app.get("/api/thumbnail/:filename", async (req, res) => {
     res.set("Content-Type", "image/jpeg");
     res.send(stdout);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -194,16 +227,16 @@ app.get("/api/frame/:filename", async (req, res) => {
     res.set("Content-Type", "image/jpeg");
     res.send(stdout);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
 // Clips sidecar file management
-function clipsPath(filename) {
+function clipsPath(filename: string) {
   return join(LIBRARY_DIR, filename + ".clips.json");
 }
 
-function readClips(filename) {
+function readClips(filename: string) {
   const p = clipsPath(filename);
   if (existsSync(p)) {
     return JSON.parse(readFileSync(p, "utf-8"));
@@ -211,7 +244,7 @@ function readClips(filename) {
   return [];
 }
 
-function writeClips(filename, clips) {
+function writeClips(filename: string, clips: any) {
   writeFileSync(clipsPath(filename), JSON.stringify(clips, null, 2));
 }
 
@@ -243,39 +276,25 @@ if (!existsSync(CACHE_DIR)) {
 }
 
 // Content-addressable render cache: hash segment settings → cached .mp4
-// Use a replacer function that sorts keys at every nesting level for deterministic output.
-function segmentHash(seg) {
-  // Exclude 'audio' from the hash — audio is mixed globally, not per-segment.
-  const json = JSON.stringify(seg, (key, value) => {
-    if (key === "audio") return undefined;
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      const sorted = {};
-      for (const k of Object.keys(value).sort()) sorted[k] = value[k];
-      return sorted;
-    }
-    return value;
-  });
-
+function segmentHash(seg: any) {
   // Include modification times of referenced library files so edits invalidate cache.
   let fileMeta = "";
-  const filesToCheck = [seg.file, seg.source].filter(Boolean);
-  for (const f of filesToCheck) {
+  for (const f of [seg.file, seg.source].filter(Boolean)) {
     try {
       const p = join(LIBRARY_DIR, f);
       if (existsSync(p)) fileMeta += `|${f}:${statSync(p).mtimeMs}`;
     } catch {}
   }
-
-  return createHash("sha256").update(json + fileMeta).digest("hex").slice(0, 16);
+  return deterministicHash(seg, { excludeKeys: ["audio"], suffix: fileMeta });
 }
 
-function getCachePath(hash) {
+function getCachePath(hash: string) {
   return join(CACHE_DIR, `${hash}.mp4`);
 }
 
 // --- Audio mixer ---
 // Resolve a single audio layer to a file path, generating if needed.
-async function resolveAudioLayer(layer, seg, ctx) {
+async function resolveAudioLayer(layer: any, seg: any, ctx: any) {
   if (layer.mute) return null;
 
   if (layer.type === "source") {
@@ -316,7 +335,7 @@ async function resolveAudioLayer(layer, seg, ctx) {
 
 
 // Render a segment, using cache if available. Returns the output file path.
-async function renderCached(seg, outFile, ctx) {
+async function renderCached(seg: any, outFile: string, ctx: any) {
   const hash = segmentHash(seg);
   const cached = getCachePath(hash);
 
@@ -339,7 +358,7 @@ async function renderCached(seg, outFile, ctx) {
         "-v", "quiet", "-print_format", "json", "-show_streams", outFile,
       ]);
       const streams = JSON.parse(stdout).streams;
-      const video = streams.find((s) => s.codec_type === "video");
+      const video = streams.find((s: any) => s.codec_type === "video");
       if (video) { srcW = video.width; srcH = video.height; }
     } catch {}
 
@@ -389,7 +408,7 @@ app.get("/api/project/:filename", (req, res) => {
     const parsed = yaml.load(raw);
     res.json({ raw, parsed });
   } catch (err) {
-    res.json({ raw, error: err.message });
+    res.json({ raw, error: (err as Error).message });
   }
 });
 
@@ -420,17 +439,17 @@ const BUILTIN_TYPES = new Set(rendererRegistry.keys());
 
 // Resolve templates: if a segment's type is not a built-in, look it up in templates
 // and deep-merge the template defaults with the segment's own properties.
-function getMergedTemplates(project) {
+function getMergedTemplates(project: any) {
   const external = loadExternalTemplates();
   const inline = project.templates || {};
   return { ...external, ...inline }; // inline overrides external
 }
 
-function resolveTemplates(project) {
+function resolveTemplates(project: any) {
   const templates = getMergedTemplates(project);
   const timeline = project.timeline || [];
 
-  function resolveSeg(seg) {
+  function resolveSeg(seg: any) {
     if (BUILTIN_TYPES.has(seg.type)) {
       // Resolve stack layers recursively
       if (seg.type === "stack" && seg.layers) {
@@ -443,7 +462,7 @@ function resolveTemplates(project) {
     const resolved = deepMerge(template, seg);
     // Resolve stack layers recursively
     if (resolved.type === "stack" && resolved.layers) {
-      resolved.layers = resolved.layers.map(resolveSeg);
+      resolved.layers = (resolved.layers as any[]).map(resolveSeg);
     }
     return resolved;
   }
@@ -451,36 +470,16 @@ function resolveTemplates(project) {
   return timeline.map(resolveSeg);
 }
 
-// Deep merge: template is the base, segment overrides.
-// For objects, merge recursively. For everything else, segment wins.
-function deepMerge(base, override) {
-  const result = {};
-  for (const key of new Set([...Object.keys(base), ...Object.keys(override)])) {
-    const bVal = base[key];
-    const oVal = override[key];
-    if (key === "type") {
-      // Use the template's real type, not the template name
-      result[key] = bVal;
-    } else if (oVal === undefined) {
-      result[key] = bVal;
-    } else if (bVal && typeof bVal === "object" && !Array.isArray(bVal) &&
-               oVal && typeof oVal === "object" && !Array.isArray(oVal)) {
-      result[key] = deepMerge(bVal, oVal);
-    } else {
-      result[key] = oVal;
-    }
-  }
-  return result;
-}
+// deepMerge imported from shared/deep-merge.js
 
 // Resolve a clip reference to start/end times
-function resolveClip(segment) {
+function resolveClip(segment: any) {
   if (segment.start != null && segment.end != null) {
     return { start: segment.start, end: segment.end };
   }
   if (segment.clip && segment.source) {
     const clips = readClips(segment.source);
-    const found = clips.find((c) => c.name === segment.clip);
+    const found = clips.find((c: any) => c.name === segment.clip);
     if (!found) throw new Error(`Clip "${segment.clip}" not found in ${segment.source}`);
     return { start: found.start, end: found.end };
   }
@@ -488,7 +487,7 @@ function resolveClip(segment) {
 }
 
 // --- Render pipeline ---
-let activeRender = null;
+let activeRender: { filename: string; progress: number; total: number } | null = null;
 
 app.post("/api/render/:filename", async (req, res) => {
   if (activeRender) {
@@ -500,11 +499,11 @@ app.post("/api/render/:filename", async (req, res) => {
     return res.status(404).json({ error: "File not found" });
   }
 
-  let project;
+  let project: any;
   try {
     project = yaml.load(readFileSync(filePath, "utf-8"));
   } catch (err) {
-    return res.status(400).json({ error: "Invalid YAML: " + err.message });
+    return res.status(400).json({ error: "Invalid YAML: " + (err as Error).message });
   }
 
   const outputSettings = project.output || {};
@@ -547,7 +546,7 @@ app.post("/api/render/:filename", async (req, res) => {
   const defaultFont = (systemFontDir + "/" + defaultFontFile).replace(/:/g, "\\:");
 
   let filterScriptCounter = 0;
-  function writeFilterScript(filter) {
+  function writeFilterScript(filter: string) {
     const p = join(OUTPUT_DIR, `_filter_${filterScriptCounter++}.txt`);
     writeFileSync(p, filter);
     return p;
@@ -588,7 +587,7 @@ app.post("/api/render/:filename", async (req, res) => {
           cached: hit,
         });
       } catch (err) {
-        errors.push(`Segment ${i} (${seg.type}): ${err.message}`);
+        errors.push(`Segment ${i} (${seg.type}): ${(err as Error).message}`);
       }
     }
 
@@ -681,7 +680,7 @@ app.post("/api/render/:filename", async (req, res) => {
             });
           }
         } catch (err) {
-          audioErrors.push(err.message);
+          audioErrors.push((err as Error).message);
         }
       }
     }
@@ -707,7 +706,7 @@ app.post("/api/render/:filename", async (req, res) => {
           });
         }
       } catch (err) {
-        audioErrors.push(err.message);
+        audioErrors.push((err as Error).message);
       }
     }
 
@@ -794,7 +793,7 @@ app.post("/api/render/:filename", async (req, res) => {
 
     broadcast({ type: "render-complete", output: outputFile, filename: outputFilename });
   } catch (err) {
-    broadcast({ type: "render-error", errors: [err.message] });
+    broadcast({ type: "render-error", errors: [(err as Error).message] });
   } finally {
     activeRender = null;
   }
@@ -811,7 +810,7 @@ app.get("/api/cache", (req, res) => {
     const totalSize = files.reduce((sum, f) => sum + statSync(join(CACHE_DIR, f)).size, 0);
     res.json({ entries: files.length, totalSizeMB: (totalSize / 1024 / 1024).toFixed(1) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -821,7 +820,7 @@ app.delete("/api/cache", (req, res) => {
     for (const f of files) unlinkSync(join(CACHE_DIR, f));
     res.json({ ok: true, cleared: files.length });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -829,13 +828,13 @@ app.delete("/api/cache", (req, res) => {
 
 // Load all external templates from the templates directory
 function loadExternalTemplates() {
-  const templates = {};
+  const templates: Record<string, any> = {};
   try {
     const files = readdirSync(TEMPLATES_DIR).filter(f => f.endsWith(".yaml") || f.endsWith(".yml"));
     for (const f of files) {
       try {
         const raw = readFileSync(join(TEMPLATES_DIR, f), "utf-8");
-        const parsed = yaml.load(raw);
+        const parsed = yaml.load(raw) as any;
         const name = f.replace(/\.ya?ml$/, "");
         if (parsed && typeof parsed === "object") {
           templates[name] = parsed;
@@ -849,7 +848,7 @@ function loadExternalTemplates() {
 app.get("/api/templates", (req, res) => {
   try {
     const templates = loadExternalTemplates();
-    const list = Object.entries(templates).map(([name, parsed]) => ({
+    const list = Object.entries(templates).map(([name, parsed]: [string, any]) => ({
       name,
       type: parsed.type || "unknown",
       parsed,
@@ -857,7 +856,7 @@ app.get("/api/templates", (req, res) => {
     }));
     res.json({ templates: list });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -870,7 +869,7 @@ app.get("/api/template/:name", (req, res) => {
     const parsed = yaml.load(raw);
     res.json({ name, raw, parsed });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -886,7 +885,7 @@ app.put("/api/template/:name", (req, res) => {
     broadcast({ type: "templates-updated" });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -899,7 +898,7 @@ app.delete("/api/template/:name", (req, res) => {
     broadcast({ type: "templates-updated" });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -909,7 +908,7 @@ app.get("/api/tts/voices", async (req, res) => {
     const voices = await getVoices();
     res.json({ voices });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -918,7 +917,7 @@ app.post("/api/tts", async (req, res) => {
     const result = await synthesize(req.body);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -935,10 +934,10 @@ app.get("/api/outputs", (req, res) => {
         const stat = statSync(filePath);
         return { name: f, size: stat.size, modified: stat.mtime };
       })
-      .sort((a, b) => new Date(b.modified) - new Date(a.modified));
+      .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
     res.json({ files });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
@@ -956,7 +955,7 @@ app.delete("/api/outputs/:filename", (req, res) => {
 app.use("/output", express.static(OUTPUT_DIR));
 
 // WebSocket for live updates
-function broadcast(msg) {
+function broadcast(msg: object) {
   const data = JSON.stringify(msg);
   for (const client of wss.clients) {
     if (client.readyState === 1) {

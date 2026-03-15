@@ -1,21 +1,21 @@
-const $ = (sel) => document.querySelector(sel);
-const $$ = (sel) => document.querySelectorAll(sel);
+const $ = (sel: string) => document.querySelector(sel) as HTMLElement | null;
+const $$ = (sel: string) => document.querySelectorAll(sel);
 
 // State
-let currentFile = null;
-let markIn = null;
-let markOut = null;
-let clips = [];
-let currentProject = null;
-let projectData = null;
-let currentOutput = null;
-let externalTemplatesCache = {};
-let currentTemplateName = null;
-let currentTemplateData = null;
+let currentFile: string | null = null;
+let markIn: number | null = null;
+let markOut: number | null = null;
+let clips: any[] = [];
+let currentProject: string | null = null;
+let projectData: any = null;
+let currentOutput: string | null = null;
+let externalTemplatesCache: Record<string, any> = {};
+let currentTemplateName: string | null = null;
+let currentTemplateData: any = null;
 
 // Undo/Redo
-const undoStack = [];
-const redoStack = [];
+const undoStack: string[] = [];
+const redoStack: string[] = [];
 const MAX_UNDO = 50;
 let undoInProgress = false;
 
@@ -28,47 +28,71 @@ function pushUndo() {
 }
 
 function updateUndoRedoButtons() {
-  const undoBtn = document.getElementById("btn-undo");
-  const redoBtn = document.getElementById("btn-redo");
+  const undoBtn = document.getElementById("btn-undo") as HTMLButtonElement | null;
+  const redoBtn = document.getElementById("btn-redo") as HTMLButtonElement | null;
   if (undoBtn) undoBtn.disabled = undoStack.length === 0;
   if (redoBtn) redoBtn.disabled = redoStack.length === 0;
 }
 
 // Elements
-const dropZone = $("#drop-zone");
-const fileInput = $("#file-input");
-const libraryList = $("#library-list");
-const video = $("#video-player");
-const viewerTitle = $("#viewer-title");
-const clipControls = $("#clip-controls");
-const clipsSection = $("#clips-section");
-const clipsList = $("#clips-list");
-const scrubber = $("#scrubber");
-const currentTimeDisplay = $("#current-time");
-const durationDisplay = $("#duration");
-const markInDisplay = $("#mark-in-display");
-const markOutDisplay = $("#mark-out-display");
-const clipNameInput = $("#clip-name-input");
-const yamlEditor = $("#yaml-editor");
-const projectSelect = $("#project-select");
-const timelineTrack = $("#timeline-track");
-const renderStatus = $("#render-status");
-const renderProgressFill = $("#render-progress-fill");
-const renderStatusText = $("#render-status-text");
-const outputsList = $("#outputs-list");
-const outputPlayer = $("#output-player");
-const outputViewerTitle = $("#output-viewer-title");
-const outputInfo = $("#output-info");
-const outputFileSize = $("#output-file-size");
+const dropZone = $("#drop-zone")!;
+const fileInput = $("#file-input") as HTMLInputElement;
+const libraryList = $("#library-list")!;
+const video = $("#video-player") as HTMLVideoElement;
+const viewerTitle = $("#viewer-title")!;
+const clipControls = $("#clip-controls")!;
+const clipsSection = $("#clips-section")!;
+const clipsList = $("#clips-list")!;
+const scrubber = $("#scrubber") as HTMLInputElement;
+const currentTimeDisplay = $("#current-time")!;
+const durationDisplay = $("#duration")!;
+const markInDisplay = $("#mark-in-display")!;
+const markOutDisplay = $("#mark-out-display")!;
+const clipNameInput = $("#clip-name-input") as HTMLInputElement;
+const yamlEditor = $("#yaml-editor") as HTMLTextAreaElement;
+const projectSelect = $("#project-select") as HTMLSelectElement;
+const timelineTrack = $("#timeline-track")!;
+const renderStatus = $("#render-status")!;
+const renderProgressFill = $("#render-progress-fill")!;
+const renderStatusText = $("#render-status-text")!;
+const outputsList = $("#outputs-list")!;
+const outputPlayer = $("#output-player") as HTMLVideoElement;
+const outputViewerTitle = $("#output-viewer-title")!;
+const outputInfo = $("#output-info")!;
+const outputFileSize = $("#output-file-size")!;
+
+// --- Async cache factory ---
+function createAsyncCache(fetchFn: () => Promise<any>) {
+  let cache: any = null;
+  return {
+    async get() { if (!cache) { try { cache = await fetchFn(); } catch { cache = []; } } return cache; },
+    clear() { cache = null; },
+  };
+}
+
+const libraryStore = createAsyncCache(() => fetch("/api/library?type=all").then(r => r.json()).then(d => d.files || []));
+const voicesStore = createAsyncCache(() => fetch("/api/tts/voices").then(r => r.json()).then(d => d.voices || []));
+const audioFilesStore = createAsyncCache(() => fetch("/api/library?type=audio").then(r => r.json()).then(d => d.files || []));
+
+async function getLibraryFiles(accept?: string[]) {
+  const files = await libraryStore.get();
+  if (accept && accept.length > 0) {
+    const exts = accept.map((e: string) => e.toLowerCase());
+    return files.filter((f: any) => exts.some((ext: string) => f.name.toLowerCase().endsWith(ext)));
+  }
+  return files;
+}
+const getVoicesList = () => voicesStore.get();
+const getAudioFiles = () => audioFilesStore.get();
 
 // --- Logs ---
-const logsContainer = $("#logs-container");
-const logsProgress = $("#logs-progress");
-const logsProgressFill = $("#logs-progress-fill");
-const logsProgressText = $("#logs-progress-text");
-$("#btn-clear-logs").addEventListener("click", () => { logsContainer.innerHTML = ""; });
+const logsContainer = $("#logs-container")!;
+const logsProgress = $("#logs-progress")!;
+const logsProgressFill = $("#logs-progress-fill")!;
+const logsProgressText = $("#logs-progress-text")!;
+$("#btn-clear-logs")!.addEventListener("click", () => { logsContainer.innerHTML = ""; });
 
-function addLog(level, message) {
+function addLog(level: string, message: string) {
   const entry = document.createElement("div");
   entry.className = `log-entry log-${level}`;
   const time = new Date().toLocaleTimeString("en-GB", { hour12: false });
@@ -77,14 +101,14 @@ function addLog(level, message) {
   logsContainer.scrollTop = logsContainer.scrollHeight;
 }
 
-function escapeHtml(str) {
+function escapeHtml(str: string) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
 }
 
 // Format time as M:SS.mmm
-function formatTime(seconds) {
+function formatTime(seconds: number) {
   if (seconds == null || isNaN(seconds)) return "--:--.---";
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
@@ -93,7 +117,7 @@ function formatTime(seconds) {
 
 // --- Tabs ---
 // --- Routing ---
-const TAB_ROUTES = {
+const TAB_ROUTES: Record<string, string> = {
   "library-tab": "/library",
   "timeline-tab": "/timeline",
   "templates-tab": "/templates",
@@ -102,8 +126,8 @@ const TAB_ROUTES = {
 };
 const ROUTE_TABS = Object.fromEntries(Object.entries(TAB_ROUTES).map(([k, v]) => [v, k]));
 
-function switchTab(tabId, { pushState = true } = {}) {
-  $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tabId));
+function switchTab(tabId: string, { pushState = true } = {}) {
+  $$(".tab").forEach((t) => t.classList.toggle("active", (t as HTMLElement).dataset.tab === tabId));
   $$(".tab-content").forEach((c) => c.classList.toggle("active", c.id === tabId));
   if (tabId === "timeline-tab") loadProjects();
   if (tabId === "templates-tab") loadTemplatesList();
@@ -177,7 +201,7 @@ function navigateFromUrl() {
 window.addEventListener("popstate", () => navigateFromUrl());
 
 for (const tab of $$(".tab")) {
-  tab.addEventListener("click", () => switchTab(tab.dataset.tab));
+  tab.addEventListener("click", () => switchTab((tab as HTMLElement).dataset.tab!));
 }
 
 // --- File upload ---
@@ -193,15 +217,15 @@ dropZone.addEventListener("dragleave", () => {
 dropZone.addEventListener("drop", (e) => {
   e.preventDefault();
   dropZone.classList.remove("drag-over");
-  uploadFiles(e.dataTransfer.files);
+  uploadFiles((e as DragEvent).dataTransfer!.files);
 });
 
 fileInput.addEventListener("change", () => {
-  uploadFiles(fileInput.files);
+  uploadFiles(fileInput.files!);
   fileInput.value = "";
 });
 
-async function uploadFiles(files) {
+async function uploadFiles(files: FileList) {
   const form = new FormData();
   for (const f of files) {
     form.append("files", f);
@@ -227,7 +251,7 @@ async function loadLibrary() {
   }
 }
 
-function renderLibrary(files) {
+function renderLibrary(files: any[]) {
   libraryList.innerHTML = "";
   for (const f of files) {
     const li = document.createElement("li");
@@ -240,7 +264,7 @@ function renderLibrary(files) {
 }
 
 // --- Video selection & playback ---
-function selectVideo(filename) {
+function selectVideo(filename: string) {
   currentFile = filename;
   markIn = null;
   markOut = null;
@@ -262,33 +286,33 @@ function selectVideo(filename) {
 }
 
 video.addEventListener("loadedmetadata", () => {
-  scrubber.max = Math.floor(video.duration * 1000);
+  scrubber.max = String(Math.floor(video.duration * 1000));
   durationDisplay.textContent = formatTime(video.duration);
 });
 
 video.addEventListener("timeupdate", () => {
   if (!video.seeking) {
-    scrubber.value = Math.floor(video.currentTime * 1000);
+    scrubber.value = String(Math.floor(video.currentTime * 1000));
   }
   currentTimeDisplay.textContent = formatTime(video.currentTime);
 });
 
 scrubber.addEventListener("input", () => {
-  video.currentTime = scrubber.value / 1000;
+  video.currentTime = Number(scrubber.value) / 1000;
 });
 
 // --- Clip marking ---
-$("#btn-mark-in").addEventListener("click", () => {
+$("#btn-mark-in")!.addEventListener("click", () => {
   markIn = video.currentTime;
   markInDisplay.textContent = formatTime(markIn);
 });
 
-$("#btn-mark-out").addEventListener("click", () => {
+$("#btn-mark-out")!.addEventListener("click", () => {
   markOut = video.currentTime;
   markOutDisplay.textContent = formatTime(markOut);
 });
 
-$("#btn-save-clip").addEventListener("click", () => {
+$("#btn-save-clip")!.addEventListener("click", () => {
   const name = clipNameInput.value.trim();
   if (!name) return alert("Enter a clip name");
   if (markIn == null) return alert("Set an in point first");
@@ -421,7 +445,7 @@ projectSelect.addEventListener("change", () => {
   }
 });
 
-$("#btn-new-project").addEventListener("click", () => {
+$("#btn-new-project")!.addEventListener("click", () => {
   const name = prompt("Project filename (e.g. my-video.yaml):");
   if (!name) return;
   const filename = name.endsWith(".yaml") || name.endsWith(".yml") ? name : name + ".yaml";
@@ -452,7 +476,7 @@ timeline:
   saveYaml();
 });
 
-async function loadProject(filename) {
+async function loadProject(filename: string) {
   try {
     const res = await fetch(`/api/project/${encodeURIComponent(filename)}`);
     const data = await res.json();
@@ -471,9 +495,9 @@ async function loadProject(filename) {
 }
 
 // Auto-save on typing with 500ms debounce
-let yamlDebounceTimer = null;
+let yamlDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 yamlEditor.addEventListener("input", () => {
-  clearTimeout(yamlDebounceTimer);
+  if (yamlDebounceTimer) clearTimeout(yamlDebounceTimer);
   yamlDebounceTimer = setTimeout(() => {
     if (currentProject) saveYaml();
   }, 500);
@@ -519,7 +543,7 @@ function parseYamlAndRender() {
     // The server does the real parsing - we just need to show the timeline
     const text = yamlEditor.value;
     // Fetch parsed version from server
-    fetch(`/api/project/${encodeURIComponent(currentProject)}`)
+    fetch(`/api/project/${encodeURIComponent(currentProject!)}`)
       .then((r) => r.json())
       .then((data) => {
         projectData = data.parsed;
@@ -531,9 +555,9 @@ function parseYamlAndRender() {
 }
 
 // --- Clip metadata cache (source -> clips array) ---
-const clipCache = {};
+const clipCache: Record<string, any[]> = {};
 
-async function getClipsForSource(source) {
+async function getClipsForSource(source: string) {
   if (clipCache[source]) return clipCache[source];
   try {
     const res = await fetch(`/api/clips/${encodeURIComponent(source)}`);
@@ -545,12 +569,12 @@ async function getClipsForSource(source) {
   return clipCache[source];
 }
 
-function resolveClipTimes(seg, sourceClips) {
+function resolveClipTimes(seg: any, sourceClips: any[]) {
   if (seg.start != null && seg.end != null) {
     return { start: seg.start, end: seg.end };
   }
   if (seg.clip) {
-    const found = sourceClips.find((c) => c.name === seg.clip);
+    const found = sourceClips.find((c: any) => c.name === seg.clip);
     if (found) return { start: found.start, end: found.end };
   }
   return null;
@@ -560,12 +584,12 @@ function resolveClipTimes(seg, sourceClips) {
 SpliceRack.formatTime = formatTime;
 
 // Helper to check if a type is a known registered type (vs. a template name)
-function isKnownType(t) {
+function isKnownType(t: string) {
   return !!SpliceRack.types[t];
 }
 
 // Dot-path helpers
-function getNestedValue(obj, path) {
+function getNestedValue(obj: any, path: string) {
   const parts = path.split(".");
   let cur = obj;
   for (const p of parts) {
@@ -575,7 +599,7 @@ function getNestedValue(obj, path) {
   return cur;
 }
 
-function setNestedValue(obj, path, value) {
+function setNestedValue(obj: any, path: string, value: any) {
   const parts = path.split(".");
   let cur = obj;
   for (let i = 0; i < parts.length - 1; i++) {
@@ -587,7 +611,7 @@ function setNestedValue(obj, path, value) {
   cur[parts[parts.length - 1]] = value;
 }
 
-function deleteNestedValue(obj, path) {
+function deleteNestedValue(obj: any, path: string) {
   const parts = path.split(".");
   let cur = obj;
   for (let i = 0; i < parts.length - 1; i++) {
@@ -599,61 +623,181 @@ function deleteNestedValue(obj, path) {
   }
 }
 
+// --- Shared property field renderer ---
+// Factory that creates a DOM element for any schema property type.
+// onChange(newValue) is called when the user changes the value.
+function renderPropertyField(prop: any, displayValue: any, onChange: (val: any) => void) {
+  if (prop.type === "string") {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = displayValue != null ? String(displayValue) : "";
+    input.addEventListener("change", () => onChange(input.value));
+    return input;
+
+  } else if (prop.type === "number") {
+    const input = document.createElement("input");
+    input.type = "number";
+    input.value = displayValue != null ? displayValue : "";
+    if (prop.min != null) input.min = prop.min;
+    if (prop.max != null) input.max = prop.max;
+    if (prop.step != null) input.step = prop.step;
+    input.addEventListener("change", () => onChange(parseFloat(input.value)));
+    return input;
+
+  } else if (prop.type === "color") {
+    const pair = document.createElement("div");
+    pair.className = "prop-color-pair";
+    const cInput = document.createElement("input");
+    cInput.type = "color";
+    cInput.value = displayValue || "#000000";
+    const tInput = document.createElement("input");
+    tInput.type = "text";
+    tInput.value = displayValue || "";
+    cInput.addEventListener("input", () => { tInput.value = cInput.value; onChange(cInput.value); });
+    tInput.addEventListener("change", () => { cInput.value = tInput.value; onChange(tInput.value); });
+    pair.appendChild(cInput);
+    pair.appendChild(tInput);
+    return pair;
+
+  } else if (prop.type === "dropdown") {
+    const sel = document.createElement("select");
+    for (const o of prop.options) {
+      const opt = document.createElement("option");
+      opt.value = o;
+      opt.textContent = o;
+      if (String(displayValue) === o) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", () => {
+      const v = sel.value === "true" ? true : sel.value === "false" ? false : sel.value;
+      onChange(v);
+    });
+    return sel;
+
+  } else if (prop.type === "file") {
+    const sel = document.createElement("select");
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = "-- select file --";
+    sel.appendChild(empty);
+    getLibraryFiles(prop.accept).then((files) => {
+      for (const f of files) {
+        const opt = document.createElement("option");
+        opt.value = f.name;
+        opt.textContent = f.name;
+        if (displayValue === f.name) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    });
+    sel.addEventListener("change", () => onChange(sel.value));
+    return sel;
+
+  } else if (prop.type === "clip-dropdown") {
+    const sel = document.createElement("select");
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = "-- manual start/end --";
+    sel.appendChild(empty);
+    // Populate from context — caller should set prop._sourceClips
+    if (prop._sourceClips) {
+      for (const c of prop._sourceClips) {
+        const opt = document.createElement("option");
+        opt.value = c.name;
+        opt.textContent = `${c.name} (${formatTime(c.start)} - ${formatTime(c.end)})`;
+        if (displayValue === c.name) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+    sel.addEventListener("change", () => onChange(sel.value));
+    return sel;
+
+  } else if (prop.type === "voice-dropdown") {
+    const sel = document.createElement("select");
+    const loading = document.createElement("option");
+    loading.value = displayValue || "";
+    loading.textContent = displayValue || "Loading voices...";
+    sel.appendChild(loading);
+    getVoicesList().then((voices) => {
+      sel.innerHTML = "";
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "-- select voice --";
+      sel.appendChild(empty);
+      for (const v of voices) {
+        const opt = document.createElement("option");
+        opt.value = v.name;
+        opt.textContent = `${v.name} (${v.gender}, ${v.localeName})`;
+        if (displayValue === v.name) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    });
+    sel.addEventListener("change", () => onChange(sel.value));
+    return sel;
+
+  } else if (prop.type === "audio-file") {
+    const sel = document.createElement("select");
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = "-- select audio --";
+    sel.appendChild(empty);
+    getAudioFiles().then((files) => {
+      for (const f of files) {
+        const opt = document.createElement("option");
+        opt.value = f.name;
+        opt.textContent = f.name;
+        if (displayValue === f.name) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    });
+    sel.addEventListener("change", () => onChange(sel.value));
+    return sel;
+  }
+
+  // Fallback for unknown types
+  const span = document.createElement("span");
+  span.textContent = String(displayValue || "");
+  span.style.color = "#808090";
+  return span;
+}
+
 // --- Template resolution (client-side, mirrors server logic) ---
 
-function resolveTemplate(seg, templates) {
+function resolveTemplate(seg: any, templates: Record<string, any>) {
   if (isKnownType(seg.type)) return seg;
   const template = templates[seg.type];
   if (!template) return seg;
   return deepMerge(template, seg);
 }
 
-function deepMerge(base, override) {
-  const result = {};
-  for (const key of new Set([...Object.keys(base), ...Object.keys(override)])) {
-    const bVal = base[key];
-    const oVal = override[key];
-    if (key === "type") {
-      result[key] = bVal;
-    } else if (oVal === undefined) {
-      result[key] = bVal;
-    } else if (bVal && typeof bVal === "object" && !Array.isArray(bVal) &&
-               oVal && typeof oVal === "object" && !Array.isArray(oVal)) {
-      result[key] = deepMerge(bVal, oVal);
-    } else {
-      result[key] = oVal;
-    }
-  }
-  return result;
-}
+// deepMerge is provided globally by /api/shared.js
 
 // --- Segment property editor ---
-let selectedSegmentIndex = null;
-let libraryFilesCache = null;
+let selectedSegmentIndex: number | null = null;
+// libraryFilesCache moved to libraryStore (async cache factory)
 
-const segmentEditor = $("#segment-editor");
-const editorTypeSelect = $("#editor-type-select");
-const editorTemplateInfo = $("#editor-template-info");
-const editorFields = $("#editor-fields");
+const segmentEditor = $("#segment-editor")!;
+const editorTypeSelect = $("#editor-type-select") as HTMLSelectElement;
+const editorTemplateInfo = $("#editor-template-info")!;
+const editorFields = $("#editor-fields")!;
 
-$("#btn-close-editor").addEventListener("click", closeEditor);
+$("#btn-close-editor")!.addEventListener("click", closeEditor);
 
 // Undo/Redo handlers
-$("#btn-undo").addEventListener("click", () => {
+$("#btn-undo")!.addEventListener("click", () => {
   if (undoStack.length === 0 || !projectData) return;
   undoInProgress = true;
   redoStack.push(JSON.stringify(projectData));
-  projectData = JSON.parse(undoStack.pop());
+  projectData = JSON.parse(undoStack.pop()!);
   syncAfterUndoRedo();
   undoInProgress = false;
   updateUndoRedoButtons();
 });
 
-$("#btn-redo").addEventListener("click", () => {
+$("#btn-redo")!.addEventListener("click", () => {
   if (redoStack.length === 0 || !projectData) return;
   undoInProgress = true;
   undoStack.push(JSON.stringify(projectData));
-  projectData = JSON.parse(redoStack.pop());
+  projectData = JSON.parse(redoStack.pop()!);
   syncAfterUndoRedo();
   undoInProgress = false;
   updateUndoRedoButtons();
@@ -676,32 +820,32 @@ function syncAfterUndoRedo() {
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
     // Only handle if not typing in an input/textarea
-    if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+    if ((e.target as HTMLElement)?.tagName === "TEXTAREA" || (e.target as HTMLElement)?.tagName === "INPUT") return;
     e.preventDefault();
-    $("#btn-undo").click();
+    ($("#btn-undo") as HTMLElement).click();
   }
   if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
-    if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+    if ((e.target as HTMLElement)?.tagName === "TEXTAREA" || (e.target as HTMLElement)?.tagName === "INPUT") return;
     e.preventDefault();
-    $("#btn-redo").click();
+    ($("#btn-redo") as HTMLElement).click();
   }
 });
 
 function closeEditor() {
   segmentEditor.style.display = "none";
   selectedSegmentIndex = null;
-  $$(".timeline-segment.selected").forEach((s) => s.classList.remove("selected"));
+  $$(".timeline-segment.selected").forEach((s: Element) => s.classList.remove("selected"));
 }
 
 // Segment toolbar actions
-$("#btn-seg-up").addEventListener("click", () => {
+$("#btn-seg-up")!.addEventListener("click", () => {
   if (selectedSegmentIndex == null || selectedSegmentIndex <= 0) return;
   moveSegment(selectedSegmentIndex, selectedSegmentIndex - 1);
   selectedSegmentIndex--;
   renderEditorPanel(selectedSegmentIndex);
 });
 
-$("#btn-seg-down").addEventListener("click", () => {
+$("#btn-seg-down")!.addEventListener("click", () => {
   if (selectedSegmentIndex == null || !projectData) return;
   if (selectedSegmentIndex >= projectData.timeline.length - 1) return;
   moveSegment(selectedSegmentIndex, selectedSegmentIndex + 1);
@@ -709,7 +853,7 @@ $("#btn-seg-down").addEventListener("click", () => {
   renderEditorPanel(selectedSegmentIndex);
 });
 
-$("#btn-seg-stack").addEventListener("click", () => {
+$("#btn-seg-stack")!.addEventListener("click", () => {
   if (selectedSegmentIndex == null || !projectData) return;
   const seg = projectData.timeline[selectedSegmentIndex];
   if (seg.type === "stack") return; // already a stack
@@ -724,7 +868,7 @@ $("#btn-seg-stack").addEventListener("click", () => {
   renderEditorPanel(selectedSegmentIndex);
 });
 
-$("#btn-seg-unstack").addEventListener("click", () => {
+$("#btn-seg-unstack")!.addEventListener("click", () => {
   if (selectedSegmentIndex == null || !projectData) return;
   const seg = projectData.timeline[selectedSegmentIndex];
   const layers = seg.layers || [];
@@ -738,7 +882,7 @@ $("#btn-seg-unstack").addEventListener("click", () => {
     projectData.timeline[selectedSegmentIndex] = layerSeg;
   } else {
     // Multiple layers — replace stack with all layers as separate segments
-    const newSegs = layers.map((l) => {
+    const newSegs = layers.map((l: any) => {
       const s = { ...l };
       delete s.opacity;
       delete s.delay;
@@ -750,7 +894,7 @@ $("#btn-seg-unstack").addEventListener("click", () => {
   renderEditorPanel(selectedSegmentIndex);
 });
 
-$("#btn-seg-delete").addEventListener("click", () => {
+$("#btn-seg-delete")!.addEventListener("click", () => {
   if (selectedSegmentIndex == null || !projectData) return;
   const seg = projectData.timeline[selectedSegmentIndex];
   if (!confirm(`Delete segment ${selectedSegmentIndex + 1} (${seg.type})?`)) return;
@@ -789,26 +933,9 @@ editorTypeSelect.addEventListener("change", () => {
   renderEditorPanel(selectedSegmentIndex);
 });
 
-async function getLibraryFiles(accept) {
-  if (!libraryFilesCache) {
-    try {
-      const res = await fetch("/api/library?type=all");
-      const data = await res.json();
-      libraryFilesCache = data.files || [];
-    } catch {
-      libraryFilesCache = [];
-    }
-  }
-  if (accept && accept.length > 0) {
-    const exts = accept.map((e) => e.toLowerCase());
-    return libraryFilesCache.filter((f) =>
-      exts.some((ext) => f.name.toLowerCase().endsWith(ext))
-    );
-  }
-  return libraryFilesCache;
-}
+// getLibraryFiles moved to async cache factory at top of file
 
-async function renderEditorPanel(index) {
+async function renderEditorPanel(index: number) {
   if (!projectData || !projectData.timeline || index >= projectData.timeline.length) {
     closeEditor();
     return;
@@ -818,14 +945,14 @@ async function renderEditorPanel(index) {
   segmentEditor.style.display = "";
 
   // Update toolbar button states
-  $("#btn-seg-up").disabled = index <= 0;
-  $("#btn-seg-down").disabled = index >= projectData.timeline.length - 1;
+  ($("#btn-seg-up") as HTMLButtonElement).disabled = index <= 0;
+  ($("#btn-seg-down") as HTMLButtonElement).disabled = index >= projectData.timeline.length - 1;
   const segTypeForToolbar = isKnownType(projectData.timeline[index].type)
     ? projectData.timeline[index].type
     : (getMergedTemplates()[projectData.timeline[index].type] || {}).type || projectData.timeline[index].type;
-  $("#btn-seg-stack").style.display = segTypeForToolbar === "stack" ? "none" : "";
+  $("#btn-seg-stack")!.style.display = segTypeForToolbar === "stack" ? "none" : "";
   // Show Unstack button only for stacks with layers
-  const unstackBtn = $("#btn-seg-unstack");
+  const unstackBtn = $("#btn-seg-unstack")!;
   if (segTypeForToolbar === "stack") {
     const layers = projectData.timeline[index].layers || [];
     if (layers.length > 0) {
@@ -943,115 +1070,36 @@ async function renderEditorPanel(index) {
     // Input control
     const displayValue = currentValue != null ? currentValue : prop.default;
 
-    if (prop.type === "string") {
-      const input = document.createElement("input");
-      input.type = "text";
-      input.value = displayValue != null ? String(displayValue) : "";
-      input.addEventListener("change", () => {
-        updateSegmentProperty(index, prop.key, input.value);
+    if (prop.type !== "layers" && prop.type !== "clip-dropdown" && prop.type !== "file") {
+      // Generic property types — use shared renderer
+      const el = renderPropertyField(prop, displayValue, (val: any) => {
+        updateSegmentProperty(index, prop.key, val);
       });
-      row.appendChild(input);
-
-    } else if (prop.type === "number") {
-      const input = document.createElement("input");
-      input.type = "number";
-      input.value = displayValue != null ? displayValue : "";
-      if (prop.min != null) input.min = prop.min;
-      if (prop.max != null) input.max = prop.max;
-      if (prop.step != null) input.step = prop.step;
-      input.addEventListener("change", () => {
-        updateSegmentProperty(index, prop.key, parseFloat(input.value));
-      });
-      row.appendChild(input);
-
-    } else if (prop.type === "color") {
-      const pair = document.createElement("div");
-      pair.className = "prop-color-pair";
-      const colorInput = document.createElement("input");
-      colorInput.type = "color";
-      colorInput.value = displayValue || "#000000";
-      const textInput = document.createElement("input");
-      textInput.type = "text";
-      textInput.value = displayValue || "";
-      colorInput.addEventListener("input", () => {
-        textInput.value = colorInput.value;
-        updateSegmentProperty(index, prop.key, colorInput.value);
-      });
-      textInput.addEventListener("change", () => {
-        colorInput.value = textInput.value;
-        updateSegmentProperty(index, prop.key, textInput.value);
-      });
-      pair.appendChild(colorInput);
-      pair.appendChild(textInput);
-      row.appendChild(pair);
-
-    } else if (prop.type === "dropdown") {
-      const select = document.createElement("select");
-      for (const opt of prop.options) {
-        const option = document.createElement("option");
-        option.value = opt;
-        option.textContent = opt;
-        if (String(displayValue) === opt) option.selected = true;
-        select.appendChild(option);
-      }
-      select.addEventListener("change", () => {
-        updateSegmentProperty(index, prop.key, select.value);
-      });
-      row.appendChild(select);
-
-    } else if (prop.type === "file") {
-      const select = document.createElement("select");
-      const emptyOpt = document.createElement("option");
-      emptyOpt.value = "";
-      emptyOpt.textContent = "-- select file --";
-      select.appendChild(emptyOpt);
-      const filteredFiles = prop.accept
-        ? libFiles.filter((f) => prop.accept.some((ext) => f.name.toLowerCase().endsWith(ext)))
-        : libFiles;
-      for (const f of filteredFiles) {
-        const option = document.createElement("option");
-        option.value = f.name;
-        option.textContent = f.name;
-        if (displayValue === f.name) option.selected = true;
-        select.appendChild(option);
-      }
-      select.addEventListener("change", () => {
-        updateSegmentProperty(index, prop.key, select.value);
-        // Re-render editor to update clip dropdown
-        renderEditorPanel(index);
-      });
-      row.appendChild(select);
-
+      row.appendChild(el);
     } else if (prop.type === "clip-dropdown") {
-      const select = document.createElement("select");
-      const emptyOpt = document.createElement("option");
-      emptyOpt.value = "";
-      emptyOpt.textContent = "-- manual start/end --";
-      select.appendChild(emptyOpt);
-      for (const c of sourceClips) {
-        const option = document.createElement("option");
-        option.value = c.name;
-        option.textContent = `${c.name} (${formatTime(c.start)} - ${formatTime(c.end)})`;
-        if (displayValue === c.name) option.selected = true;
-        select.appendChild(option);
-      }
-      select.addEventListener("change", () => {
-        if (select.value) {
-          updateSegmentProperty(index, "clip", select.value);
-          // Remove manual start/end when selecting a clip
+      // Special: clip-dropdown needs sourceClips and has custom change logic
+      const clipProp = { ...prop, _sourceClips: sourceClips };
+      const el = renderPropertyField(clipProp, displayValue, (val: any) => {
+        if (val) {
+          updateSegmentProperty(index, "clip", val);
           deleteNestedValue(projectData.timeline[index], "start");
           deleteNestedValue(projectData.timeline[index], "end");
         } else {
           deleteNestedValue(projectData.timeline[index], "clip");
-          // Set default start/end
           setNestedValue(projectData.timeline[index], "start", 0);
           setNestedValue(projectData.timeline[index], "end", 10);
         }
         syncYamlFromData();
         renderEditorPanel(index);
       });
-      row.appendChild(select);
-
+      row.appendChild(el);
+    } else if (prop.type === "file") {
+      // Special: file changes should re-render editor (for clip dropdown update)
+      const el = renderPropertyField(prop, displayValue, (val: any) => {
+        updateSegmentProperty(index, prop.key, val);
+        renderEditorPanel(index);
+      });
+      row.appendChild(el);
     } else if (prop.type === "layers") {
       // Layers editor — renders as a list of layer cards
       const layersContainer = document.createElement("div");
@@ -1088,11 +1136,11 @@ async function renderEditorPanel(index) {
         typeSelect.appendChild(builtinGroup);
         // Templates (segment types only, excluding stack)
         const layerTemplates = Object.entries(getMergedTemplates())
-          .filter(([, v]) => v.type && SpliceRack.types[v.type] && v.type !== "stack");
+          .filter(([, v]) => (v as any).type && SpliceRack.types[(v as any).type] && (v as any).type !== "stack");
         if (layerTemplates.length > 0) {
           const tmplGroup = document.createElement("optgroup");
           tmplGroup.label = "Templates";
-          for (const [name, tmpl] of layerTemplates) {
+          for (const [name, tmpl] of layerTemplates as [string, any][]) {
             const opt = document.createElement("option");
             opt.value = name;
             opt.textContent = `${name} (${tmpl.type})`;
@@ -1224,112 +1272,22 @@ async function renderEditorPanel(index) {
             const val = getNestedValue(resolvedLayer, sp.key);
             const displayVal = val != null ? val : sp.default;
 
-            if (sp.type === "string") {
-              const input = document.createElement("input");
-              input.type = "text";
-              input.value = displayVal != null ? String(displayVal) : "";
-              input.addEventListener("change", () => {
-                setNestedValue(layer, sp.key, input.value);
-                syncYamlFromData();
-              });
-              subRow.appendChild(input);
-            } else if (sp.type === "number") {
-              const input = document.createElement("input");
-              input.type = "number";
-              input.value = displayVal != null ? displayVal : "";
-              if (sp.min != null) input.min = sp.min;
-              if (sp.max != null) input.max = sp.max;
-              if (sp.step != null) input.step = sp.step;
-              input.addEventListener("change", () => {
-                setNestedValue(layer, sp.key, parseFloat(input.value));
-                syncYamlFromData();
-              });
-              subRow.appendChild(input);
-            } else if (sp.type === "color") {
-              const pair = document.createElement("div");
-              pair.className = "prop-color-pair";
-              const cInput = document.createElement("input");
-              cInput.type = "color";
-              cInput.value = displayVal || "#000000";
-              const tInput = document.createElement("input");
-              tInput.type = "text";
-              tInput.value = displayVal || "";
-              cInput.addEventListener("input", () => {
-                tInput.value = cInput.value;
-                setNestedValue(layer, sp.key, cInput.value);
-                syncYamlFromData();
-              });
-              tInput.addEventListener("change", () => {
-                cInput.value = tInput.value;
-                setNestedValue(layer, sp.key, tInput.value);
-                syncYamlFromData();
-              });
-              pair.appendChild(cInput);
-              pair.appendChild(tInput);
-              subRow.appendChild(pair);
-            } else if (sp.type === "dropdown") {
-              const sel = document.createElement("select");
-              for (const o of sp.options) {
-                const opt = document.createElement("option");
-                opt.value = o;
-                opt.textContent = o;
-                if (String(displayVal) === o) opt.selected = true;
-                sel.appendChild(opt);
-              }
-              sel.addEventListener("change", () => {
-                setNestedValue(layer, sp.key, sel.value);
+            if (sp.type === "clip-dropdown") {
+              const clipProp = { ...sp, _sourceClips: clipCache[getNestedValue(layer, "source") as string] || [] };
+              const el = renderPropertyField(clipProp, displayVal, (val: any) => {
+                if (val) { layer.clip = val; delete layer.start; delete layer.end; }
+                else { delete layer.clip; layer.start = 0; layer.end = 10; }
                 syncYamlFromData();
                 renderEditorPanel(index);
               });
-              subRow.appendChild(sel);
-            } else if (sp.type === "file") {
-              const sel = document.createElement("select");
-              const eo = document.createElement("option");
-              eo.value = "";
-              eo.textContent = "-- select file --";
-              sel.appendChild(eo);
-              for (const f of libFiles) {
-                const opt = document.createElement("option");
-                opt.value = f.name;
-                opt.textContent = f.name;
-                if (displayVal === f.name) opt.selected = true;
-                sel.appendChild(opt);
-              }
-              sel.addEventListener("change", () => {
-                setNestedValue(layer, sp.key, sel.value);
+              subRow.appendChild(el);
+            } else {
+              const el = renderPropertyField(sp, displayVal, (val: any) => {
+                setNestedValue(layer, sp.key, val);
                 syncYamlFromData();
-                renderEditorPanel(index);
+                if (sp.type === "file" || sp.type === "dropdown") renderEditorPanel(index);
               });
-              subRow.appendChild(sel);
-            } else if (sp.type === "clip-dropdown") {
-              const sel = document.createElement("select");
-              const eo = document.createElement("option");
-              eo.value = "";
-              eo.textContent = "-- manual start/end --";
-              sel.appendChild(eo);
-              const layerSource = getNestedValue(layer, "source");
-              const layerClips = layerSource ? (clipCache[layerSource] || []) : [];
-              for (const c of layerClips) {
-                const opt = document.createElement("option");
-                opt.value = c.name;
-                opt.textContent = `${c.name} (${formatTime(c.start)} - ${formatTime(c.end)})`;
-                if (displayVal === c.name) opt.selected = true;
-                sel.appendChild(opt);
-              }
-              sel.addEventListener("change", () => {
-                if (sel.value) {
-                  layer.clip = sel.value;
-                  delete layer.start;
-                  delete layer.end;
-                } else {
-                  delete layer.clip;
-                  layer.start = 0;
-                  layer.end = 10;
-                }
-                syncYamlFromData();
-                renderEditorPanel(index);
-              });
-              subRow.appendChild(sel);
+              subRow.appendChild(el);
             }
 
             subProps.appendChild(subRow);
@@ -1396,7 +1354,7 @@ async function renderEditorPanel(index) {
   editorFields.appendChild(buildKeyframesEditor(index, rawSeg));
 }
 
-function buildKeyframesEditor(segIndex, rawSeg) {
+function buildKeyframesEditor(segIndex: number, rawSeg: any) {
   const container = document.createElement("div");
   container.style.padding = "0 12px 8px";
 
@@ -1481,9 +1439,9 @@ function buildKeyframesEditor(segIndex, rawSeg) {
       const input = document.createElement("input");
       input.type = "number";
       input.value = kf[f.key] != null ? kf[f.key] : (f.key === "scale" ? 1 : f.key === "x" || f.key === "y" ? 0.5 : 0);
-      if (f.step != null) input.step = f.step;
-      if (f.min != null) input.min = f.min;
-      if (f.max != null) input.max = f.max;
+      if (f.step != null) input.step = String(f.step);
+      if (f.min != null) input.min = String(f.min);
+      if (f.max != null) input.max = String(f.max);
       input.addEventListener("change", () => {
         kf[f.key] = parseFloat(input.value);
         // Update the summary label
@@ -1537,7 +1495,7 @@ function buildKeyframesEditor(segIndex, rawSeg) {
 }
 
 // Audio layer type schemas
-const AUDIO_LAYER_SCHEMAS = {
+const AUDIO_LAYER_SCHEMAS: Record<string, any[]> = {
   source: [
     { key: "volume", label: "Volume", type: "number", default: 1, min: 0, max: 2, step: 0.1 },
     { key: "mute", label: "Mute", type: "dropdown", default: "false", options: ["false", "true"] },
@@ -1557,34 +1515,9 @@ const AUDIO_LAYER_SCHEMAS = {
 };
 
 // Voice list cache
-let voicesCache = null;
-async function getVoicesList() {
-  if (voicesCache) return voicesCache;
-  try {
-    const res = await fetch("/api/tts/voices");
-    const data = await res.json();
-    voicesCache = data.voices || [];
-  } catch {
-    voicesCache = [];
-  }
-  return voicesCache;
-}
+// voicesCache and audioFilesCache moved to async cache factory at top of file
 
-// Audio file list cache
-let audioFilesCache = null;
-async function getAudioFiles() {
-  if (audioFilesCache) return audioFilesCache;
-  try {
-    const res = await fetch("/api/library?type=audio");
-    const data = await res.json();
-    audioFilesCache = data.files || [];
-  } catch {
-    audioFilesCache = [];
-  }
-  return audioFilesCache;
-}
-
-function buildAudioLayersEditor(segIndex, rawSeg) {
+function buildAudioLayersEditor(segIndex: number, rawSeg: any) {
   const container = document.createElement("div");
   container.style.padding = "0 12px 8px";
 
@@ -1652,7 +1585,7 @@ function buildAudioLayersEditor(segIndex, rawSeg) {
         // Template-based audio layer — just set type, overrides come from user
         audioLayers[ai] = { type: val };
       } else {
-        const newLayer = { type: val };
+        const newLayer: any = { type: val };
         if (val === "source") { newLayer.volume = 1; }
         else if (val === "tts") { newLayer.text = ""; newLayer.voice = ""; newLayer.volume = 1; }
         else if (val === "file") { newLayer.source = ""; newLayer.volume = 1; }
@@ -1715,93 +1648,11 @@ function buildAudioLayersEditor(segIndex, rawSeg) {
         const isInherited = isAudioTemplate && layer[sp.key] === undefined;
         if (isInherited) subRow.classList.add("prop-inherited");
 
-        if (sp.type === "string") {
-          const input = document.createElement("input");
-          input.type = "text";
-          input.value = displayVal || "";
-          input.addEventListener("change", () => {
-            layer[sp.key] = input.value;
-            syncYamlFromData();
-          });
-          subRow.appendChild(input);
-
-        } else if (sp.type === "number") {
-          const input = document.createElement("input");
-          input.type = "number";
-          input.value = displayVal != null ? displayVal : "";
-          if (sp.min != null) input.min = sp.min;
-          if (sp.max != null) input.max = sp.max;
-          if (sp.step != null) input.step = sp.step;
-          input.addEventListener("change", () => {
-            layer[sp.key] = parseFloat(input.value);
-            syncYamlFromData();
-          });
-          subRow.appendChild(input);
-
-        } else if (sp.type === "dropdown") {
-          const sel = document.createElement("select");
-          for (const o of sp.options) {
-            const opt = document.createElement("option");
-            opt.value = o;
-            opt.textContent = o;
-            if (String(displayVal) === o) opt.selected = true;
-            sel.appendChild(opt);
-          }
-          sel.addEventListener("change", () => {
-            layer[sp.key] = sel.value === "true" ? true : sel.value === "false" ? false : sel.value;
-            syncYamlFromData();
-          });
-          subRow.appendChild(sel);
-
-        } else if (sp.type === "voice-dropdown") {
-          const sel = document.createElement("select");
-          const loading = document.createElement("option");
-          loading.value = displayVal || "";
-          loading.textContent = displayVal || "Loading voices...";
-          sel.appendChild(loading);
-          // Populate async
-          getVoicesList().then((voices) => {
-            sel.innerHTML = "";
-            const empty = document.createElement("option");
-            empty.value = "";
-            empty.textContent = "-- select voice --";
-            sel.appendChild(empty);
-            for (const v of voices) {
-              const opt = document.createElement("option");
-              opt.value = v.name;
-              opt.textContent = `${v.name} (${v.gender}, ${v.localeName})`;
-              if (displayVal === v.name) opt.selected = true;
-              sel.appendChild(opt);
-            }
-          });
-          sel.addEventListener("change", () => {
-            layer[sp.key] = sel.value;
-            syncYamlFromData();
-          });
-          subRow.appendChild(sel);
-
-        } else if (sp.type === "audio-file") {
-          const sel = document.createElement("select");
-          const empty = document.createElement("option");
-          empty.value = "";
-          empty.textContent = "-- select audio --";
-          sel.appendChild(empty);
-          // Populate async
-          getAudioFiles().then((files) => {
-            for (const f of files) {
-              const opt = document.createElement("option");
-              opt.value = f.name;
-              opt.textContent = f.name;
-              if (displayVal === f.name) opt.selected = true;
-              sel.appendChild(opt);
-            }
-          });
-          sel.addEventListener("change", () => {
-            layer[sp.key] = sel.value;
-            syncYamlFromData();
-          });
-          subRow.appendChild(sel);
-        }
+        const el = renderPropertyField(sp, displayVal, (val: any) => {
+          layer[sp.key] = val;
+          syncYamlFromData();
+        });
+        subRow.appendChild(el);
 
         // Revert button for template overrides
         if (isAudioTemplate && layer[sp.key] !== undefined) {
@@ -1845,7 +1696,7 @@ function buildAudioLayersEditor(segIndex, rawSeg) {
   return container;
 }
 
-function updateSegmentProperty(index, key, value) {
+function updateSegmentProperty(index: number, key: string, value: any) {
   if (!projectData || !projectData.timeline[index]) return;
   setNestedValue(projectData.timeline[index], key, value);
   syncYamlFromData();
@@ -1863,26 +1714,26 @@ async function renderTimeline() {
   const templates = getMergedTemplates();
 
   // Resolve templates for display
-  const resolved = projectData.timeline.map((seg) => resolveTemplate(seg, templates));
+  const resolved = projectData.timeline.map((seg: any) => resolveTemplate(seg, templates));
 
   // Pre-fetch clip metadata for all sources referenced in timeline
-  const sources = [...new Set(
+  const sources = [...new Set<string>(
     resolved
-      .filter((s) => s.type === "clip" && s.source)
-      .map((s) => s.source)
+      .filter((s: any) => s.type === "clip" && s.source)
+      .map((s: any) => s.source as string)
   )];
-  await Promise.all(sources.map(getClipsForSource));
+  await Promise.all(sources.map((s: string) => getClipsForSource(s)));
 
-  let dragSrcIndex = null;
+  let dragSrcIndex: number | null = null;
 
-  resolved.forEach((seg, index) => {
+  resolved.forEach((seg: any, index: number) => {
     const rawSeg = projectData.timeline[index]; // original (may have template name)
     const templateName = isKnownType(rawSeg.type) ? null : rawSeg.type;
 
     const div = document.createElement("div");
     div.className = "timeline-segment";
     div.draggable = true;
-    div.dataset.index = index;
+    div.dataset.index = String(index);
 
     // Type badge
     const badge = document.createElement("div");
@@ -1914,7 +1765,7 @@ async function renderTimeline() {
 
     const typeDef = SpliceRack.types[seg.type];
     if (typeDef && typeDef.timelineDisplay) {
-      const display = typeDef.timelineDisplay(seg, clipTimes);
+      const display = typeDef.timelineDisplay(seg, clipTimes ?? undefined);
       title.textContent = display.title;
       detail.textContent = display.detail;
     } else {
@@ -1930,7 +1781,7 @@ async function renderTimeline() {
 
     // Click to select and open editor
     div.addEventListener("click", () => {
-      $$(".timeline-segment.selected").forEach((s) => s.classList.remove("selected"));
+      $$(".timeline-segment.selected").forEach((s: Element) => s.classList.remove("selected"));
       div.classList.add("selected");
       selectYamlSegment(index);
       renderEditorPanel(index);
@@ -1940,17 +1791,17 @@ async function renderTimeline() {
     div.addEventListener("dragstart", (e) => {
       dragSrcIndex = index;
       div.classList.add("dragging");
-      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer!.effectAllowed = "move";
     });
 
     div.addEventListener("dragend", () => {
       div.classList.remove("dragging");
-      $$(".timeline-segment").forEach((s) => s.classList.remove("drag-over"));
+      $$(".timeline-segment").forEach((s: Element) => s.classList.remove("drag-over"));
     });
 
     div.addEventListener("dragover", (e) => {
       e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
+      e.dataTransfer!.dropEffect = "move";
       div.classList.add("drag-over");
     });
 
@@ -1971,7 +1822,7 @@ async function renderTimeline() {
   });
 }
 
-function selectYamlSegment(index) {
+function selectYamlSegment(index: number) {
   const text = yamlEditor.value;
   // Find top-level timeline segment starts: exactly "  - type:" (2-space indent)
   // Not deeper-nested ones inside layers/audio arrays
@@ -2001,7 +1852,7 @@ function selectYamlSegment(index) {
   yamlEditor.scrollTop = Math.max(0, linesBefore * lineHeight - 40);
 }
 
-function moveSegment(from, to) {
+function moveSegment(from: number, to: number) {
   if (to < 0 || to >= projectData.timeline.length) return;
   const [item] = projectData.timeline.splice(from, 1);
   projectData.timeline.splice(to, 0, item);
@@ -2009,7 +1860,7 @@ function moveSegment(from, to) {
 }
 
 // Serialize a value for YAML output
-function yamlValue(v, indent) {
+function yamlValue(v: any, indent: string): string {
   if (v == null) return "null";
   if (typeof v === "string") return `"${v.replace(/"/g, '\\"')}"`;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
@@ -2034,7 +1885,7 @@ function yamlValue(v, indent) {
   return String(v);
 }
 
-function serializeObject(obj, indent) {
+function serializeObject(obj: any, indent: string): string[] {
   const lines = [];
   for (const [k, val] of Object.entries(obj)) {
     if (val === undefined) continue;
@@ -2078,26 +1929,17 @@ function syncYamlFromData() {
   lines.push("timeline:");
 
   for (const seg of projectData.timeline) {
-    const isTemplate = !isKnownType(seg.type);
     lines.push(`  - type: ${seg.type}`);
 
-    if (isTemplate) {
-      // For template segments, only serialize overridden properties
-      // (audio and keyframes are handled universally below)
-      for (const [k, v] of Object.entries(seg)) {
-        if (k === "type" || k === "audio" || k === "keyframes") continue;
-        if (v === undefined) continue;
-        const rendered = yamlValue(v, "    ");
-        if (rendered.startsWith("\n")) {
-          lines.push(`    ${k}:${rendered}`);
-        } else {
-          lines.push(`    ${k}: ${rendered}`);
-        }
-      }
-    } else {
-      const typeDef = SpliceRack.types[seg.type];
-      if (typeDef && typeDef.serialize) {
-        typeDef.serialize(seg, lines);
+    // Generic serialization for all segments (audio and keyframes handled below)
+    for (const [k, v] of Object.entries(seg)) {
+      if (k === "type" || k === "audio" || k === "keyframes") continue;
+      if (v === undefined) continue;
+      const rendered = yamlValue(v, "    ");
+      if (rendered.startsWith("\n")) {
+        lines.push(`    ${k}:${rendered}`);
+      } else {
+        lines.push(`    ${k}: ${rendered}`);
       }
     }
 
@@ -2142,7 +1984,7 @@ function syncYamlFromData() {
 
 // --- Add segment ---
 // Populate the add-segment type dropdown from the registry
-const addSegmentType = $("#add-segment-type");
+const addSegmentType = $("#add-segment-type") as HTMLSelectElement;
 
 function refreshAddSegmentDropdown() {
   addSegmentType.innerHTML = "";
@@ -2158,11 +2000,11 @@ function refreshAddSegmentDropdown() {
   addSegmentType.appendChild(builtinGroup);
   // Templates (segment types only — those with a type that maps to a built-in)
   const merged = getMergedTemplates();
-  const segTemplates = Object.entries(merged).filter(([, v]) => SpliceRack.types[v.type]);
+  const segTemplates = Object.entries(merged).filter(([, v]) => SpliceRack.types[(v as any).type]);
   if (segTemplates.length > 0) {
     const tmplGroup = document.createElement("optgroup");
     tmplGroup.label = "Templates";
-    for (const [name, tmpl] of segTemplates) {
+    for (const [name, tmpl] of segTemplates as [string, any][]) {
       const opt = document.createElement("option");
       opt.value = name;
       opt.textContent = `${name} (${tmpl.type})`;
@@ -2173,7 +2015,7 @@ function refreshAddSegmentDropdown() {
 }
 refreshAddSegmentDropdown();
 
-$("#btn-add-segment").addEventListener("click", () => {
+$("#btn-add-segment")!.addEventListener("click", () => {
   if (!projectData) return alert("Open or create a project first");
   const typeName = addSegmentType.value;
   const typeDef = SpliceRack.types[typeName];
@@ -2189,7 +2031,7 @@ $("#btn-add-segment").addEventListener("click", () => {
 });
 
 // --- Render ---
-$("#btn-render").addEventListener("click", async () => {
+$("#btn-render")!.addEventListener("click", async () => {
   if (!currentProject) return alert("No project selected");
 
   // Save first
@@ -2208,7 +2050,7 @@ $("#btn-render").addEventListener("click", async () => {
       renderStatusText.textContent = `Error: ${data.error}`;
     }
   } catch (err) {
-    renderStatusText.textContent = `Error: ${err.message}`;
+    renderStatusText.textContent = `Error: ${(err as Error).message}`;
   }
 });
 
@@ -2226,7 +2068,7 @@ async function loadOutputs() {
   }
 }
 
-function renderOutputsList(files) {
+function renderOutputsList(files: any[]) {
   outputsList.innerHTML = "";
   for (const f of files) {
     const li = document.createElement("li");
@@ -2239,7 +2081,7 @@ function renderOutputsList(files) {
   }
 }
 
-function selectOutput(filename) {
+function selectOutput(filename: string) {
   currentOutput = filename;
   updateRoute();
   outputViewerTitle.textContent = filename;
@@ -2256,7 +2098,7 @@ function selectOutput(filename) {
   fetch("/api/outputs")
     .then((r) => r.json())
     .then((data) => {
-      const f = data.files.find((x) => x.name === filename);
+      const f = data.files.find((x: any) => x.name === filename);
       if (f) {
         const sizeMB = (f.size / 1024 / 1024).toFixed(1);
         outputFileSize.textContent = `${sizeMB} MB - ${new Date(f.modified).toLocaleString()}`;
@@ -2264,7 +2106,7 @@ function selectOutput(filename) {
     });
 }
 
-$("#btn-delete-output").addEventListener("click", async () => {
+$("#btn-delete-output")!.addEventListener("click", async () => {
   if (!currentOutput) return;
   if (!confirm(`Delete "${currentOutput}"? This cannot be undone.`)) return;
   try {
@@ -2286,8 +2128,8 @@ function connectWS() {
   ws.addEventListener("message", (e) => {
     const msg = JSON.parse(e.data);
     if (msg.type === "library-updated") {
-      libraryFilesCache = null;
-      audioFilesCache = null;
+      libraryStore.clear();
+      audioFilesStore.clear();
       loadLibrary();
     } else if (msg.type === "clips-updated") {
       delete clipCache[msg.filename];
@@ -2353,13 +2195,14 @@ function connectWS() {
 }
 
 // Handle tab in YAML editor (insert spaces instead of changing focus)
-yamlEditor.addEventListener("keydown", (e) => {
+(yamlEditor as HTMLTextAreaElement).addEventListener("keydown", (e: KeyboardEvent) => {
   if (e.key === "Tab") {
     e.preventDefault();
-    const start = yamlEditor.selectionStart;
-    const end = yamlEditor.selectionEnd;
-    yamlEditor.value = yamlEditor.value.substring(0, start) + "  " + yamlEditor.value.substring(end);
-    yamlEditor.selectionStart = yamlEditor.selectionEnd = start + 2;
+    const ta = yamlEditor as HTMLTextAreaElement;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    ta.value = ta.value.substring(0, start) + "  " + ta.value.substring(end);
+    ta.selectionStart = ta.selectionEnd = start + 2;
   }
 });
 
@@ -2371,7 +2214,7 @@ async function loadExternalTemplates() {
     const res = await fetch("/api/templates");
     const data = await res.json();
     externalTemplatesCache = {};
-    for (const t of data.templates || []) {
+    for (const t of (data.templates || []) as any[]) {
       externalTemplatesCache[t.name] = t.parsed;
     }
   } catch {
@@ -2385,13 +2228,13 @@ function getMergedTemplates() {
   return { ...externalTemplatesCache, ...inline };
 }
 
-const templatesList = $("#templates-list");
-const templateEditorTitle = $("#template-editor-title");
-const templateEditorFields = $("#template-editor-fields");
-const templateTypeSelect = $("#template-type-select");
-const templateTypeRow = $(".template-type-row");
+const templatesList = $("#templates-list")!;
+const templateEditorTitle = $("#template-editor-title")!;
+const templateEditorFields = $("#template-editor-fields")!;
+const templateTypeSelect = $("#template-type-select") as HTMLSelectElement;
+const templateTypeRow = $(".template-type-row")!;
 
-const templatesFilter = $("#templates-filter");
+const templatesFilter = $("#templates-filter") as HTMLInputElement;
 templatesFilter.addEventListener("input", () => renderFilteredTemplatesList());
 
 async function loadTemplatesList() {
@@ -2409,13 +2252,13 @@ function renderFilteredTemplatesList() {
     .sort(([a], [b]) => a.localeCompare(b));
 
   // Split into video and audio
-  const videoTemplates = entries.filter(([, t]) => !AUDIO_TYPES.has(t.type));
-  const audioTemplates = entries.filter(([, t]) => AUDIO_TYPES.has(t.type));
+  const videoTemplates = entries.filter(([, t]) => !AUDIO_TYPES.has((t as any).type));
+  const audioTemplates = entries.filter(([, t]) => AUDIO_TYPES.has((t as any).type));
 
-  function renderGroup(label, items) {
+  function renderGroup(label: string, items: [string, any][]) {
     if (items.length === 0) return;
     // Group by base type
-    const byType = {};
+    const byType: Record<string, [string, any][]> = {};
     for (const [name, tmpl] of items) {
       const t = tmpl.type || "unknown";
       if (!byType[t]) byType[t] = [];
@@ -2448,7 +2291,7 @@ function renderFilteredTemplatesList() {
   renderGroup("Audio", audioTemplates);
 }
 
-async function selectTemplate(name) {
+async function selectTemplate(name: string) {
   try {
     const res = await fetch(`/api/template/${encodeURIComponent(name)}`);
     const data = await res.json();
@@ -2470,13 +2313,13 @@ function renderTemplateEditor() {
     templateEditorTitle.textContent = "Select a template";
     templateEditorFields.innerHTML = "";
     templateTypeRow.style.display = "none";
-    $("#btn-delete-template").style.display = "none";
+    $("#btn-delete-template")!.style.display = "none";
     return;
   }
 
   templateEditorTitle.textContent = currentTemplateName;
   templateTypeRow.style.display = "";
-  $("#btn-delete-template").style.display = "";
+  $("#btn-delete-template")!.style.display = "";
 
   // Populate type dropdown
   templateTypeSelect.innerHTML = "";
@@ -2506,24 +2349,7 @@ function renderTemplateFields() {
   const tmpl = currentTemplateData;
   const typeName = tmpl.type;
   const typeDef = SpliceRack.types[typeName];
-  const AUDIO_SCHEMAS = {
-    tts: [
-      { key: "voice", label: "Voice", type: "voice-dropdown", default: "" },
-      { key: "volume", label: "Volume", type: "number", default: 1, min: 0, max: 2, step: 0.1 },
-      { key: "delay", label: "Delay (s)", type: "number", default: 0, step: 0.1 },
-    ],
-    file: [
-      { key: "source", label: "File", type: "audio-file", default: "" },
-      { key: "volume", label: "Volume", type: "number", default: 1, min: 0, max: 2, step: 0.1 },
-      { key: "delay", label: "Delay (s)", type: "number", default: 0, step: 0.1 },
-      { key: "loop", label: "Loop", type: "dropdown", default: "false", options: ["false", "true"] },
-    ],
-    source: [
-      { key: "volume", label: "Volume", type: "number", default: 1, min: 0, max: 2, step: 0.1 },
-    ],
-  };
-
-  const schema = typeDef ? typeDef.schema : AUDIO_SCHEMAS[typeName];
+  const schema = typeDef ? typeDef.schema : AUDIO_LAYER_SCHEMAS[typeName];
   if (!schema) {
     templateEditorFields.innerHTML = '<div style="padding:12px;color:#808090;font-size:12px">Unknown type</div>';
     return;
@@ -2542,121 +2368,20 @@ function renderTemplateFields() {
     const val = getNestedValue(tmpl, prop.key);
     const displayVal = val != null ? val : prop.default;
 
-    if (prop.type === "string") {
-      const input = document.createElement("input");
-      input.type = "text";
-      input.value = displayVal != null ? String(displayVal) : "";
-      input.addEventListener("change", () => {
-        setNestedValue(tmpl, prop.key, input.value);
-        autoSaveTemplate();
-      });
-      row.appendChild(input);
-    } else if (prop.type === "number") {
-      const input = document.createElement("input");
-      input.type = "number";
-      input.value = displayVal != null ? displayVal : "";
-      if (prop.min != null) input.min = prop.min;
-      if (prop.max != null) input.max = prop.max;
-      if (prop.step != null) input.step = prop.step;
-      input.addEventListener("change", () => {
-        setNestedValue(tmpl, prop.key, parseFloat(input.value));
-        autoSaveTemplate();
-      });
-      row.appendChild(input);
-    } else if (prop.type === "color") {
-      const pair = document.createElement("div");
-      pair.className = "prop-color-pair";
-      const cInput = document.createElement("input");
-      cInput.type = "color";
-      cInput.value = displayVal || "#000000";
-      const tInput = document.createElement("input");
-      tInput.type = "text";
-      tInput.value = displayVal || "";
-      cInput.addEventListener("input", () => {
-        tInput.value = cInput.value;
-        setNestedValue(tmpl, prop.key, cInput.value);
-        autoSaveTemplate();
-      });
-      tInput.addEventListener("change", () => {
-        cInput.value = tInput.value;
-        setNestedValue(tmpl, prop.key, tInput.value);
-        autoSaveTemplate();
-      });
-      pair.appendChild(cInput);
-      pair.appendChild(tInput);
-      row.appendChild(pair);
-    } else if (prop.type === "dropdown") {
-      const sel = document.createElement("select");
-      for (const o of prop.options) {
-        const opt = document.createElement("option");
-        opt.value = o;
-        opt.textContent = o;
-        if (String(displayVal) === o) opt.selected = true;
-        sel.appendChild(opt);
-      }
-      sel.addEventListener("change", () => {
-        const v = sel.value === "true" ? true : sel.value === "false" ? false : sel.value;
-        setNestedValue(tmpl, prop.key, v);
-        autoSaveTemplate();
-      });
-      row.appendChild(sel);
-    } else if (prop.type === "voice-dropdown") {
-      const sel = document.createElement("select");
-      const loading = document.createElement("option");
-      loading.value = displayVal || "";
-      loading.textContent = displayVal || "Loading...";
-      sel.appendChild(loading);
-      getVoicesList().then((voices) => {
-        sel.innerHTML = "";
-        const empty = document.createElement("option");
-        empty.value = "";
-        empty.textContent = "-- select voice --";
-        sel.appendChild(empty);
-        for (const v of voices) {
-          const opt = document.createElement("option");
-          opt.value = v.name;
-          opt.textContent = `${v.name} (${v.gender}, ${v.localeName})`;
-          if (displayVal === v.name) opt.selected = true;
-          sel.appendChild(opt);
-        }
-      });
-      sel.addEventListener("change", () => {
-        setNestedValue(tmpl, prop.key, sel.value);
-        autoSaveTemplate();
-      });
-      row.appendChild(sel);
-
-    } else if (prop.type === "file") {
-      const sel = document.createElement("select");
-      const empty = document.createElement("option");
-      empty.value = "";
-      empty.textContent = "-- select file --";
-      sel.appendChild(empty);
-      getLibraryFiles(prop.accept).then((files) => {
-        for (const f of files) {
-          const opt = document.createElement("option");
-          opt.value = f.name;
-          opt.textContent = f.name;
-          if (displayVal === f.name) opt.selected = true;
-          sel.appendChild(opt);
-        }
-      });
-      sel.addEventListener("change", () => {
-        setNestedValue(tmpl, prop.key, sel.value);
-        autoSaveTemplate();
-      });
-      row.appendChild(sel);
-
-    } else if (prop.type === "clip-dropdown") {
-      const sel = document.createElement("select");
-      const empty = document.createElement("option");
-      empty.value = "";
-      empty.textContent = "-- manual start/end --";
-      sel.appendChild(empty);
+    if (prop.type === "clip-dropdown") {
+      // Special: clip-dropdown needs async clips and custom logic
       const src = getNestedValue(tmpl, "source");
+      const clipProp = { ...prop, _sourceClips: [] };
+      const el = renderPropertyField(clipProp, displayVal, (val: any) => {
+        if (val) { tmpl.clip = val; delete tmpl.start; delete tmpl.end; }
+        else { delete tmpl.clip; }
+        autoSaveTemplate();
+      });
+      // Populate clips async
       if (src) {
         getClipsForSource(src).then(() => {
           const clips = clipCache[src] || [];
+          const sel = el;
           for (const c of clips) {
             const opt = document.createElement("option");
             opt.value = c.name;
@@ -2666,47 +2391,23 @@ function renderTemplateFields() {
           }
         });
       }
-      sel.addEventListener("change", () => {
-        if (sel.value) {
-          tmpl.clip = sel.value;
-          delete tmpl.start;
-          delete tmpl.end;
-        } else {
-          delete tmpl.clip;
-        }
+      row.appendChild(el);
+    } else {
+      const el = renderPropertyField(prop, displayVal, (val: any) => {
+        setNestedValue(tmpl, prop.key, val);
         autoSaveTemplate();
+        if (prop.type === "file") renderTemplateFields();
       });
-      row.appendChild(sel);
-
-    } else if (prop.type === "audio-file") {
-      const sel = document.createElement("select");
-      const empty = document.createElement("option");
-      empty.value = "";
-      empty.textContent = "-- select audio --";
-      sel.appendChild(empty);
-      getAudioFiles().then((files) => {
-        for (const f of files) {
-          const opt = document.createElement("option");
-          opt.value = f.name;
-          opt.textContent = f.name;
-          if (displayVal === f.name) opt.selected = true;
-          sel.appendChild(opt);
-        }
-      });
-      sel.addEventListener("change", () => {
-        setNestedValue(tmpl, prop.key, sel.value);
-        autoSaveTemplate();
-      });
-      row.appendChild(sel);
+      row.appendChild(el);
     }
 
     templateEditorFields.appendChild(row);
   }
 }
 
-let templateSaveTimer = null;
+let templateSaveTimer: ReturnType<typeof setTimeout> | null = null;
 function autoSaveTemplate() {
-  clearTimeout(templateSaveTimer);
+  if (templateSaveTimer) clearTimeout(templateSaveTimer);
   templateSaveTimer = setTimeout(async () => {
     if (!currentTemplateName || !currentTemplateData) return;
     try {
@@ -2728,7 +2429,7 @@ templateTypeSelect.addEventListener("change", () => {
   const newData = { type: templateTypeSelect.value };
   const typeDef = SpliceRack.types[templateTypeSelect.value];
   if (typeDef) {
-    const defaults = typeDef.defaults();
+    const defaults = typeDef.defaults() as any;
     delete defaults.type; // keep our type name
     Object.assign(newData, defaults);
   }
@@ -2737,7 +2438,7 @@ templateTypeSelect.addEventListener("change", () => {
   renderTemplateFields();
 });
 
-$("#btn-new-template").addEventListener("click", async () => {
+$("#btn-new-template")!.addEventListener("click", async () => {
   const name = prompt("Template name:");
   if (!name) return;
   try {
@@ -2753,7 +2454,7 @@ $("#btn-new-template").addEventListener("click", async () => {
   }
 });
 
-$("#btn-delete-template").addEventListener("click", async () => {
+$("#btn-delete-template")!.addEventListener("click", async () => {
   if (!currentTemplateName) return;
   if (!confirm(`Delete template "${currentTemplateName}"?`)) return;
   try {

@@ -26,21 +26,9 @@ SpliceRack.registerType("caption", {
 
   timelineDisplay(seg) {
     return {
-      title: seg.text || "(empty caption)",
+      title: (seg.text as string) || "(empty caption)",
       detail: `${seg.duration || 3}s`,
     };
   },
 
-  serialize(seg, lines) {
-    lines.push(`    text: "${(seg.text || "").replace(/"/g, '\\"')}"`);
-    lines.push(`    duration: ${seg.duration || 3}`);
-    if (seg.style) {
-      lines.push("    style:");
-      for (const [k, v] of Object.entries(seg.style)) {
-        lines.push(`      ${k}: ${typeof v === "string" ? `"${v}"` : v}`);
-      }
-    }
-    if (seg["fade-in"]) lines.push(`    fade-in: ${seg["fade-in"]}`);
-    if (seg["fade-out"]) lines.push(`    fade-out: ${seg["fade-out"]}`);
-  },
 });

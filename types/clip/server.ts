@@ -1,11 +1,14 @@
+import { buildTextAlignmentExpr } from "../_helpers.ts";
+import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
+
 export default {
   type: "clip",
 
-  async render(seg, outFile, ctx) {
+  async render(seg: Segment, outFile: string, ctx: RenderContext): Promise<void> {
     const { start, end } = ctx.resolveClip(seg);
     const duration = end - start;
-    const speed = seg.speed || 1.0;
-    const sourcePath = ctx.join(ctx.LIBRARY_DIR, seg.source);
+    const speed = (seg.speed as number) || 1.0;
+    const sourcePath = ctx.join(ctx.LIBRARY_DIR, seg.source as string);
 
     if (!ctx.existsSync(sourcePath)) {
       throw new Error(`Source file not found: ${seg.source}`);
@@ -16,20 +19,18 @@ export default {
     // Build overlay filters if present
     let overlayFilters = "";
     let hasFont = false;
-    if (seg.overlay && seg.overlay.length > 0) {
-      for (const ov of seg.overlay) {
+    const overlay = seg.overlay as Array<Record<string, unknown>> | undefined;
+    if (overlay && overlay.length > 0) {
+      for (const ov of overlay) {
         if (ov.type === "caption") {
           hasFont = true;
-          const style = ov.style || {};
+          const style = (ov.style || {}) as Record<string, unknown>;
           const fontSize = style["font-size"] || 36;
-          const color = (style.color || "#ffffff").replace("#", "");
-          const ovAlign = style.align || "center";
-          const ovValign = style.valign || "bottom";
-          const xExpr =
-            ovAlign === "left" ? "50" : ovAlign === "right" ? "(w-text_w-50)" : "((w-text_w)/2)";
-          const yExpr =
-            ovValign === "top" ? "50" : ovValign === "bottom" ? "(h-text_h-50)" : "((h-text_h)/2)";
-          const escapedText = ov.text
+          const color = (((style.color as string) || "#ffffff")).replace("#", "");
+          const ovAlign = (style.align as string) || "center";
+          const ovValign = (style.valign as string) || "bottom";
+          const { xExpr, yExpr } = buildTextAlignmentExpr(ovAlign, ovValign);
+          const escapedText = (ov.text as string)
             .replace(/\\/g, "\\\\\\\\")
             .replace(/'/g, "\u2019")
             .replace(/:/g, "\\:")
@@ -39,7 +40,7 @@ export default {
       }
     }
 
-    const vfParts = [];
+    const vfParts: string[] = [];
     vfParts.push(`scale=${ctx.width}:${ctx.height}:force_original_aspect_ratio=decrease,pad=${ctx.width}:${ctx.height}:(ow-iw)/2:(oh-ih)/2`);
     if (speed !== 1.0) {
       vfParts.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
@@ -75,4 +76,4 @@ export default {
     // Always video-only — the audio mixer handles audio layers separately
     await ctx.execFileAsync("ffmpeg", args, { maxBuffer: 50 * 1024 * 1024 });
   },
-};
+} satisfies SegmentRenderer;

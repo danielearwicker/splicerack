@@ -6,29 +6,30 @@ import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
 
+interface RenderHtmlToVideoOptions {
+  html: string;
+  width: number;
+  height: number;
+  fps: number;
+  duration: number;
+  outFile: string;
+  tempDir: string;
+}
+
 /**
  * Render an HTML/CSS animation to an MP4 video file.
- *
- * @param {object} opts
- * @param {string} opts.html - Full HTML document string (including <style> and animation CSS)
- * @param {number} opts.width - Output width in pixels
- * @param {number} opts.height - Output height in pixels
- * @param {number} opts.fps - Frames per second
- * @param {number} opts.duration - Total duration in seconds
- * @param {string} opts.outFile - Output MP4 path
- * @param {string} opts.tempDir - Directory for temporary frame PNGs
  */
-export async function renderHtmlToVideo({ html, width, height, fps, duration, outFile, tempDir }) {
+export async function renderHtmlToVideo({ html, width, height, fps, duration, outFile, tempDir }: RenderHtmlToVideoOptions): Promise<void> {
   const framesDir = join(tempDir, `_html_frames_${Date.now()}`);
   if (!existsSync(framesDir)) mkdirSync(framesDir, { recursive: true });
 
   const totalFrames = Math.ceil(duration * fps);
   const frameDuration = 1000 / fps; // ms per frame
 
-  let browser;
+  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
   try {
     browser = await puppeteer.launch({
-      headless: "new",
+      headless: true,
       args: [
         `--window-size=${width},${height}`,
         "--no-sandbox",
@@ -57,8 +58,8 @@ export async function renderHtmlToVideo({ html, width, height, fps, duration, ou
       const timeMs = frame * frameDuration;
 
       // Set all animations to the target time
-      await page.evaluate((t) => {
-        document.getAnimations({ subtree: true }).forEach((anim) => {
+      await (page as any).evaluate((t: number) => {
+        (document as any).getAnimations({ subtree: true }).forEach((anim: Animation) => {
           anim.currentTime = t;
         });
       }, timeMs);

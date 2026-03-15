@@ -1,21 +1,18 @@
+import { buildTextAlignmentExpr } from "../_helpers.ts";
+import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
+
 export default {
   type: "caption",
 
-  async render(seg, outFile, ctx) {
+  async render(seg: Segment, outFile: string, ctx: RenderContext): Promise<void> {
     const duration = seg.duration || 3;
-    const style = seg.style || {};
+    const style = (seg.style || {}) as Record<string, unknown>;
     const fontSize = style["font-size"] || 48;
-    const color = (style.color || "#ffffff").replace("#", "");
-    const bgColor = (style.background || ctx.defaultBg).replace("#", "");
-    const align = style.align || "center";
-    const valign = style.valign || "middle";
+    const color = (((style.color as string) || "#ffffff")).replace("#", "");
+    const bgColor = (((style.background as string) || ctx.defaultBg)).replace("#", "");
+    const { xExpr, yExpr } = buildTextAlignmentExpr((style.align as string) || "center", (style.valign as string) || "middle");
 
-    const xExpr =
-      align === "left" ? "50" : align === "right" ? "(w-text_w-50)" : "((w-text_w)/2)";
-    const yExpr =
-      valign === "top" ? "50" : valign === "bottom" ? "(h-text_h-50)" : "((h-text_h)/2)";
-
-    const escapedText = seg.text
+    const escapedText = (seg.text as string)
       .replace(/\\/g, "\\\\\\\\")
       .replace(/'/g, "\u2019")
       .replace(/:/g, "\\:")
@@ -38,4 +35,4 @@ export default {
       outFile,
     ], { maxBuffer: 50 * 1024 * 1024 });
   },
-};
+} satisfies SegmentRenderer;

@@ -21,37 +21,15 @@ SpliceRack.registerType("clip", {
   },
 
   timelineDisplay(seg, clipTimes) {
-    const title = seg.clip || (seg.source ? `${seg.source} [${seg.start}-${seg.end}]` : "(no source)");
-    const parts = [seg.source || ""];
+    const title = (seg.clip as string) || (seg.source ? `${seg.source} [${seg.start}-${seg.end}]` : "(no source)");
+    const parts = [(seg.source as string) || ""];
     if (clipTimes) {
       const dur = clipTimes.end - clipTimes.start;
-      const speed = seg.speed || 1;
+      const speed = (seg.speed as number) || 1;
       parts.push(SpliceRack.formatTime(dur / speed));
     }
     if (seg.speed && seg.speed !== 1) parts.push(`@ ${seg.speed}x`);
     return { title, detail: parts.join("  ") };
   },
 
-  serialize(seg, lines) {
-    if (seg.source) lines.push(`    source: ${seg.source}`);
-    if (seg.clip) lines.push(`    clip: ${seg.clip}`);
-    if (seg.start != null && !seg.clip) lines.push(`    start: ${seg.start}`);
-    if (seg.end != null && !seg.clip) lines.push(`    end: ${seg.end}`);
-    if (seg.speed && seg.speed !== 1) lines.push(`    speed: ${seg.speed}`);
-    if (seg.overlay) {
-      lines.push("    overlay:");
-      for (const ov of seg.overlay) {
-        lines.push(`      - type: ${ov.type}`);
-        if (ov.text) lines.push(`        text: "${ov.text.replace(/"/g, '\\"')}"`);
-        if (ov.style) {
-          lines.push("        style:");
-          for (const [k, v] of Object.entries(ov.style)) {
-            lines.push(`          ${k}: ${typeof v === "string" ? `"${v}"` : v}`);
-          }
-        }
-      }
-    }
-    if (seg["fade-in"]) lines.push(`    fade-in: ${seg["fade-in"]}`);
-    if (seg["fade-out"]) lines.push(`    fade-out: ${seg["fade-out"]}`);
-  },
 });

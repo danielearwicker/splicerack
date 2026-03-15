@@ -1,9 +1,11 @@
+import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
+
 export default {
   type: "pause",
 
-  async render(seg, outFile, ctx) {
+  async render(seg: Segment, outFile: string, ctx: RenderContext): Promise<void> {
     const duration = seg.duration || 1;
-    const bgColor = (seg.background || ctx.defaultBg).replace("#", "");
+    const bgColor = ((seg.background as string) || ctx.defaultBg).replace("#", "");
 
     await ctx.execFileAsync("ffmpeg", [
       "-y",
@@ -16,4 +18,4 @@ export default {
       outFile,
     ], { maxBuffer: 50 * 1024 * 1024 });
   },
-};
+} satisfies SegmentRenderer;

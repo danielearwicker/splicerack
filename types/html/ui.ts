@@ -24,15 +24,4 @@ SpliceRack.registerType("html", {
     };
   },
 
-  serialize(seg, lines) {
-    if (seg.duration) lines.push(`    duration: ${seg.duration}`);
-    if (seg.file) lines.push(`    file: "${seg.file}"`);
-    if (seg.html) lines.push(`    html: "${seg.html.replace(/"/g, '\\"')}"`);
-    if (seg.vars) {
-      lines.push("    vars:");
-      for (const [k, v] of Object.entries(seg.vars)) {
-        lines.push(`      ${k}: "${String(v).replace(/"/g, '\\"')}"`);
-      }
-    }
-  },
 });

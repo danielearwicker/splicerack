@@ -1,17 +1,14 @@
-import { createHash } from "crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
+import { deterministicHash } from "../shared/hash.ts";
+import type { Voice, SynthesizeParams, SynthesizeResult } from "../shared/types.ts";
 
 // Derive TTS endpoint from AZURE_SPEECH_ENDPOINT.
-// The cognitive services endpoint (e.g. https://uksouth.api.cognitive.microsoft.com/)
-// does NOT serve TTS directly. The TTS REST API lives at {region}.tts.speech.microsoft.com.
-function getTtsEndpoint() {
+function getTtsEndpoint(): string {
   const endpoint = (process.env.AZURE_SPEECH_ENDPOINT || "").replace(/\/+$/, "");
   const match = endpoint.match(/https?:\/\/(\w+)\./);
-  if (match) {
-    return `https://${match[1]}.tts.speech.microsoft.com`;
-  }
-  return endpoint; // fallback: use as-is
+  if (match) return `https://${match[1]}.tts.speech.microsoft.com`;
+  return endpoint;
 }
 const AZURE_ENDPOINT = getTtsEndpoint();
 const CACHE_DIR = join(process.cwd(), "cache", "tts");
@@ -20,30 +17,17 @@ if (!existsSync(CACHE_DIR)) {
   mkdirSync(CACHE_DIR, { recursive: true });
 }
 
-// Deterministic hash for TTS settings
-function ttsHash(settings) {
-  const json = JSON.stringify(settings, (key, value) => {
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      const sorted = {};
-      for (const k of Object.keys(value).sort()) sorted[k] = value[k];
-      return sorted;
-    }
-    return value;
-  });
-  return createHash("sha256").update(json).digest("hex").slice(0, 16);
-}
-
 // Cached voice list
-let voicesCache = null;
+let voicesCache: Voice[] | null = null;
 
-export async function getVoices() {
+export async function getVoices(): Promise<Voice[]> {
   if (voicesCache) return voicesCache;
 
   // Try loading from disk cache
   const diskCache = join(CACHE_DIR, "_voices.json");
   if (existsSync(diskCache)) {
     try {
-      voicesCache = JSON.parse(readFileSync(diskCache, "utf-8"));
+      voicesCache = JSON.parse(readFileSync(diskCache, "utf-8")) as Voice[];
       return voicesCache;
     } catch {}
   }
@@ -60,7 +44,7 @@ export async function getVoices() {
     throw new Error(`Azure voices API error: ${res.status} ${res.statusText}`);
   }
 
-  const raw = await res.json();
+  const raw = await res.json() as Array<Record<string, string>>;
   voicesCache = raw.map((v) => ({
     name: v.ShortName,
     displayName: v.DisplayName,
@@ -75,9 +59,9 @@ export async function getVoices() {
   return voicesCache;
 }
 
-export async function synthesize({ text, voice, rate, pitch, volume }) {
+export async function synthesize({ text, voice, rate, pitch, volume }: SynthesizeParams): Promise<SynthesizeResult> {
   const settings = { text, voice, rate: rate || "0%", pitch: pitch || "0%", volume: volume || 1 };
-  const hash = ttsHash(settings);
+  const hash = deterministicHash(settings);
   const cachedPath = join(CACHE_DIR, `${hash}.mp3`);
 
   if (existsSync(cachedPath)) {
@@ -117,7 +101,7 @@ export async function synthesize({ text, voice, rate, pitch, volume }) {
   return { path: cachedPath, cached: false };
 }
 
-function escapeXml(str) {
+function escapeXml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -126,7 +110,7 @@ function escapeXml(str) {
     .replace(/'/g, "&apos;");
 }
 
-export function clearVoicesCache() {
+export function clearVoicesCache(): void {
   voicesCache = null;
   const diskCache = join(CACHE_DIR, "_voices.json");
   try { if (existsSync(diskCache)) writeFileSync(diskCache, ""); } catch {}

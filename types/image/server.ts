@@ -1,9 +1,11 @@
+import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
+
 export default {
   type: "image",
 
-  async render(seg, outFile, ctx) {
+  async render(seg: Segment, outFile: string, ctx: RenderContext): Promise<void> {
     const duration = seg.duration || 5;
-    const sourcePath = ctx.join(ctx.LIBRARY_DIR, seg.source);
+    const sourcePath = ctx.join(ctx.LIBRARY_DIR, seg.source as string);
 
     if (!ctx.existsSync(sourcePath)) {
       throw new Error(`Source file not found: ${seg.source}`);
@@ -11,12 +13,12 @@ export default {
 
     const fadeFilter = ctx.buildFadeFilter(seg, duration);
 
-    let vf;
+    let vf: string;
     if (seg.animation) {
-      const anim = seg.animation;
+      const anim = seg.animation as Record<string, unknown>;
       if (anim.type === "ken-burns" || anim.type === "zoom" || anim.type === "pan") {
-        const from = anim.from || { x: 0, y: 0, scale: 1.0 };
-        const to = anim.to || { x: 0, y: 0, scale: 1.2 };
+        const from = (anim.from || { x: 0, y: 0, scale: 1.0 }) as { x?: number; y?: number; scale?: number };
+        const to = (anim.to || { x: 0, y: 0, scale: 1.2 }) as { x?: number; y?: number; scale?: number };
         const zStart = from.scale || 1.0;
         const zEnd = to.scale || 1.2;
         const totalFrames = duration * ctx.fps;
@@ -45,4 +47,4 @@ export default {
       outFile,
     ], { maxBuffer: 50 * 1024 * 1024 });
   },
-};
+} satisfies SegmentRenderer;

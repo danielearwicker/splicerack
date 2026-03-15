@@ -1,21 +1,22 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { renderHtmlToVideo } from "../../services/html-renderer.js";
+import { renderHtmlToVideo } from "../../services/html-renderer.ts";
+import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
 
 export default {
   type: "html",
 
-  async render(seg, outFile, ctx) {
+  async render(seg: Segment, outFile: string, ctx: RenderContext): Promise<void> {
     const duration = seg.duration || 3;
 
     // HTML can come from inline content or a file reference
-    let html;
+    let html: string;
     if (seg.file) {
-      const filePath = join(ctx.LIBRARY_DIR, seg.file);
+      const filePath = join(ctx.LIBRARY_DIR, seg.file as string);
       if (!existsSync(filePath)) throw new Error(`HTML file not found: ${seg.file}`);
       html = readFileSync(filePath, "utf-8");
     } else if (seg.html) {
-      html = seg.html;
+      html = seg.html as string;
     } else {
       throw new Error("html segment requires either 'html' (inline) or 'file' property");
     }
@@ -30,7 +31,7 @@ export default {
 
     // Substitute any custom variables from seg.vars
     if (seg.vars) {
-      for (const [key, value] of Object.entries(seg.vars)) {
+      for (const [key, value] of Object.entries(seg.vars as Record<string, unknown>)) {
         html = html.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), String(value));
       }
     }
@@ -45,4 +46,4 @@ export default {
       tempDir: ctx.OUTPUT_DIR,
     });
   },
-};
+} satisfies SegmentRenderer;

@@ -21,8 +21,4 @@ SpliceRack.registerType("pause", {
     };
   },
 
-  serialize(seg, lines) {
-    lines.push(`    duration: ${seg.duration || 1}`);
-    if (seg.background) lines.push(`    background: "${seg.background}"`);
-  },
 });

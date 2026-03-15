@@ -1,9 +1,11 @@
+import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
+
 export default {
   type: "stack",
 
-  async render(seg, outFile, ctx) {
-    const layers = seg.layers || [];
-    const bgColor = (seg.background || ctx.defaultBg).replace("#", "");
+  async render(seg: Segment, outFile: string, ctx: RenderContext): Promise<void> {
+    const layers = (seg.layers || []) as Array<Record<string, unknown> & Segment>;
+    const bgColor = ((seg.background as string) || ctx.defaultBg).replace("#", "");
 
     if (layers.length === 0) {
       // Empty stack — render a blank frame
@@ -18,7 +20,7 @@ export default {
     }
 
     // Render each layer to a temp file, using cache where possible
-    const layerFiles = [];
+    const layerFiles: string[] = [];
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
 
@@ -26,16 +28,15 @@ export default {
       layerFiles.push(layerFile);
 
       // Build a segment for the sub-renderer (without stack-specific props)
-      const layerSeg = { ...layer };
+      const layerSeg = { ...layer } as Record<string, unknown>;
       delete layerSeg.opacity;
       delete layerSeg.delay;
 
-      await ctx.renderCached(layerSeg, layerFile, ctx);
+      await ctx.renderCached(layerSeg as Segment, layerFile, ctx);
     }
 
     if (layers.length === 1 && !layers[0].opacity && !layers[0].delay) {
       // Single layer with no compositing — just use it directly
-      const { existsSync } = await import("fs");
       const { rename } = await import("fs/promises");
       await rename(layerFiles[0], outFile);
       return;
@@ -43,13 +44,13 @@ export default {
 
     // Determine total duration from the longest layer + delay
     // We'll probe each layer for its duration
-    const layerDurations = [];
+    const layerDurations: number[] = [];
     for (let i = 0; i < layerFiles.length; i++) {
       try {
         const { stdout } = await ctx.execFileAsync("ffprobe", [
           "-v", "quiet", "-print_format", "json", "-show_format", layerFiles[i],
         ]);
-        const info = JSON.parse(stdout);
+        const info = JSON.parse(stdout as string);
         layerDurations.push(parseFloat(info.format.duration) || 5);
       } catch {
         layerDurations.push(5);
@@ -57,17 +58,17 @@ export default {
     }
 
     const totalDuration = seg.duration || Math.max(
-      ...layers.map((l, i) => (l.delay || 0) + layerDurations[i])
+      ...layers.map((l, i) => ((l.delay as number) || 0) + layerDurations[i])
     );
 
     // Build filter_complex for compositing
     // Start with a solid background canvas
-    const inputs = [];
+    const inputs: string[] = [];
     for (const f of layerFiles) {
       inputs.push("-i", f);
     }
 
-    const filterLines = [];
+    const filterLines: string[] = [];
     // Base canvas
     filterLines.push(
       `color=c=0x${bgColor}:s=${ctx.width}x${ctx.height}:d=${totalDuration}:r=${ctx.fps},format=yuva420p[base]`
@@ -75,14 +76,14 @@ export default {
 
     let lastLabel = "base";
     for (let i = 0; i < layers.length; i++) {
-      const opacity = layers[i].opacity != null ? layers[i].opacity : 1;
-      const delay = layers[i].delay || 0;
+      const opacity = layers[i].opacity != null ? (layers[i].opacity as number) : 1;
+      const delay = (layers[i].delay as number) || 0;
 
       const layerLabel = `l${i}`;
       const outLabel = `out${i}`;
 
       // Build per-layer filter: handle delay and opacity
-      const layerFilters = [];
+      const layerFilters: string[] = [];
       if (delay > 0) {
         layerFilters.push(`tpad=start_duration=${delay}:color=black@0`);
       }
@@ -121,4 +122,4 @@ export default {
       try { if (ctx.existsSync(f)) (await import("fs")).unlinkSync(f); } catch {}
     }
   },
-};
+} satisfies SegmentRenderer;
