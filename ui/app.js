@@ -789,14 +789,21 @@ editorTypeSelect.addEventListener("change", () => {
   renderEditorPanel(selectedSegmentIndex);
 });
 
-async function getLibraryFiles() {
-  if (libraryFilesCache) return libraryFilesCache;
-  try {
-    const res = await fetch("/api/library");
-    const data = await res.json();
-    libraryFilesCache = data.files || [];
-  } catch {
-    libraryFilesCache = [];
+async function getLibraryFiles(accept) {
+  if (!libraryFilesCache) {
+    try {
+      const res = await fetch("/api/library?type=all");
+      const data = await res.json();
+      libraryFilesCache = data.files || [];
+    } catch {
+      libraryFilesCache = [];
+    }
+  }
+  if (accept && accept.length > 0) {
+    const exts = accept.map((e) => e.toLowerCase());
+    return libraryFilesCache.filter((f) =>
+      exts.some((ext) => f.name.toLowerCase().endsWith(ext))
+    );
   }
   return libraryFilesCache;
 }
@@ -998,7 +1005,10 @@ async function renderEditorPanel(index) {
       emptyOpt.value = "";
       emptyOpt.textContent = "-- select file --";
       select.appendChild(emptyOpt);
-      for (const f of libFiles) {
+      const filteredFiles = prop.accept
+        ? libFiles.filter((f) => prop.accept.some((ext) => f.name.toLowerCase().endsWith(ext)))
+        : libFiles;
+      for (const f of filteredFiles) {
         const option = document.createElement("option");
         option.value = f.name;
         option.textContent = f.name;
@@ -2607,6 +2617,79 @@ function renderTemplateFields() {
           opt.value = v.name;
           opt.textContent = `${v.name} (${v.gender}, ${v.localeName})`;
           if (displayVal === v.name) opt.selected = true;
+          sel.appendChild(opt);
+        }
+      });
+      sel.addEventListener("change", () => {
+        setNestedValue(tmpl, prop.key, sel.value);
+        autoSaveTemplate();
+      });
+      row.appendChild(sel);
+
+    } else if (prop.type === "file") {
+      const sel = document.createElement("select");
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "-- select file --";
+      sel.appendChild(empty);
+      getLibraryFiles(prop.accept).then((files) => {
+        for (const f of files) {
+          const opt = document.createElement("option");
+          opt.value = f.name;
+          opt.textContent = f.name;
+          if (displayVal === f.name) opt.selected = true;
+          sel.appendChild(opt);
+        }
+      });
+      sel.addEventListener("change", () => {
+        setNestedValue(tmpl, prop.key, sel.value);
+        autoSaveTemplate();
+      });
+      row.appendChild(sel);
+
+    } else if (prop.type === "clip-dropdown") {
+      const sel = document.createElement("select");
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "-- manual start/end --";
+      sel.appendChild(empty);
+      const src = getNestedValue(tmpl, "source");
+      if (src) {
+        getClipsForSource(src).then(() => {
+          const clips = clipCache[src] || [];
+          for (const c of clips) {
+            const opt = document.createElement("option");
+            opt.value = c.name;
+            opt.textContent = `${c.name} (${formatTime(c.start)} - ${formatTime(c.end)})`;
+            if (displayVal === c.name) opt.selected = true;
+            sel.appendChild(opt);
+          }
+        });
+      }
+      sel.addEventListener("change", () => {
+        if (sel.value) {
+          tmpl.clip = sel.value;
+          delete tmpl.start;
+          delete tmpl.end;
+        } else {
+          delete tmpl.clip;
+        }
+        autoSaveTemplate();
+      });
+      row.appendChild(sel);
+
+    } else if (prop.type === "audio-file") {
+      const sel = document.createElement("select");
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "-- select audio --";
+      sel.appendChild(empty);
+      getAudioFiles().then((files) => {
+        for (const f of files) {
+          const opt = document.createElement("option");
+          opt.value = f.name;
+          opt.textContent = f.name;
+          if (displayVal === f.name) opt.selected = true;
           sel.appendChild(opt);
         }
       });

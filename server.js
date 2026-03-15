@@ -97,10 +97,15 @@ app.get("/api/library", async (req, res) => {
         const ext = extname(f).toLowerCase();
         const videoExts = [".mp4", ".mov", ".avi", ".mkv", ".webm"];
         const audioExts = [".mp3", ".wav", ".aac", ".ogg", ".flac", ".m4a"];
+        const htmlExts = [".html", ".htm"];
+        const imageExts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
         const typeFilter = req.query.type;
         if (typeFilter === "audio") return audioExts.includes(ext);
         if (typeFilter === "video") return videoExts.includes(ext);
-        return [...videoExts, ...audioExts].includes(ext);
+        if (typeFilter === "html") return htmlExts.includes(ext);
+        if (typeFilter === "image") return imageExts.includes(ext);
+        if (typeFilter === "all") return true;
+        return [...videoExts, ...audioExts, ...htmlExts, ...imageExts].includes(ext);
       })
       .map((f) => {
         const filePath = join(LIBRARY_DIR, f);
@@ -250,7 +255,18 @@ function segmentHash(seg) {
     }
     return value;
   });
-  return createHash("sha256").update(json).digest("hex").slice(0, 16);
+
+  // Include modification times of referenced library files so edits invalidate cache.
+  let fileMeta = "";
+  const filesToCheck = [seg.file, seg.source].filter(Boolean);
+  for (const f of filesToCheck) {
+    try {
+      const p = join(LIBRARY_DIR, f);
+      if (existsSync(p)) fileMeta += `|${f}:${statSync(p).mtimeMs}`;
+    } catch {}
+  }
+
+  return createHash("sha256").update(json + fileMeta).digest("hex").slice(0, 16);
 }
 
 function getCachePath(hash) {

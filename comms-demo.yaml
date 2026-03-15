@@ -5,6 +5,8 @@ output:
   background: "#1a1a2e"
 
 timeline:
+  - type: logo intro
+
   - type: heading
     text: "Comms Explainer Demo Thingy"
 
@@ -122,3 +124,9 @@ timeline:
     style:
       color: "#e94560"
       font-size: 48
+
+  - type: logo outro
+
+  - type: html
+    duration: 3
+    html: "<body style=\"background: silver\"><p>This is unimpressive as an example!</p></body>"
