@@ -16,6 +16,7 @@ import { buildFadeFilter, buildKeyframeFilter } from "./types/_helpers.ts";
 import { getVoices, synthesize } from "./services/tts.ts";
 import { deterministicHash } from "./shared/hash.ts";
 import { deepMerge } from "./shared/deep-merge.ts";
+import { H264_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, probeJson } from "./shared/ffmpeg.ts";
 import tsBlankSpace from "ts-blank-space";
 
 const execFileAsync = promisify(execFile);
@@ -162,14 +163,8 @@ app.get("/api/probe/:filename", async (req, res) => {
     return res.status(404).json({ error: "File not found" });
   }
   try {
-    const { stdout } = await execFileAsync("ffprobe", [
-      "-v", "quiet",
-      "-print_format", "json",
-      "-show_format",
-      "-show_streams",
-      filePath,
-    ]);
-    res.json(JSON.parse(stdout));
+    const info = await probeJson(execFileAsync, filePath);
+    res.json(info);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -311,7 +306,7 @@ async function resolveAudioLayer(layer: any, seg: any, ctx: any) {
       "-vn", "-af", `volume=${vol}`,
       "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
       audioFile,
-    ], { maxBuffer: 50 * 1024 * 1024 });
+    ], FFMPEG_MAX_BUFFER);
     return { path: audioFile, delay: layer.delay || 0, temp: true };
 
   } else if (layer.type === "tts") {
@@ -354,11 +349,8 @@ async function renderCached(seg: any, outFile: string, ctx: any) {
     // Probe source dimensions
     let srcW = ctx.width, srcH = ctx.height;
     try {
-      const { stdout } = await execFileAsync("ffprobe", [
-        "-v", "quiet", "-print_format", "json", "-show_streams", outFile,
-      ]);
-      const streams = JSON.parse(stdout).streams;
-      const video = streams.find((s: any) => s.codec_type === "video");
+      const info = await probeJson(execFileAsync, outFile, "streams");
+      const video = info.streams.find((s: any) => s.codec_type === "video");
       if (video) { srcW = video.width; srcH = video.height; }
     } catch {}
 
@@ -368,9 +360,9 @@ async function renderCached(seg: any, outFile: string, ctx: any) {
     await execFileAsync("ffmpeg", [
       "-y", "-i", outFile,
       "-filter_complex_script", kfScript,
-      "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+      ...H264_ARGS,
       "-an", kfTmp,
-    ], { maxBuffer: 50 * 1024 * 1024 });
+    ], FFMPEG_MAX_BUFFER);
     unlinkSync(outFile);
     copyFileSync(kfTmp, outFile);
     unlinkSync(kfTmp);
@@ -610,7 +602,7 @@ app.post("/api/render/:filename", async (req, res) => {
       "-c", "copy",
       "-movflags", "+faststart",
       concatTmp,
-    ], { maxBuffer: 50 * 1024 * 1024 });
+    ], FFMPEG_MAX_BUFFER);
 
     // --- Global audio mix ---
     broadcast({ type: "render-phase", phase: "Mixing audio..." });
@@ -618,10 +610,8 @@ app.post("/api/render/:filename", async (req, res) => {
     const segDurations = [];
     for (const f of tempFiles) {
       try {
-        const { stdout } = await execFileAsync("ffprobe", [
-          "-v", "quiet", "-print_format", "json", "-show_format", f,
-        ]);
-        segDurations.push(parseFloat(JSON.parse(stdout).format.duration) || 0);
+        const info = await probeJson(execFileAsync, f, "format");
+        segDurations.push(parseFloat(info.format.duration) || 0);
       } catch { segDurations.push(0); }
     }
     const segStartTimes = [];
@@ -764,7 +754,7 @@ app.post("/api/render/:filename", async (req, res) => {
         "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
         "-movflags", "+faststart",
         outputFile,
-      ], { maxBuffer: 50 * 1024 * 1024 });
+      ], FFMPEG_MAX_BUFFER);
 
       if (existsSync(concatTmp)) unlinkSync(concatTmp);
     } else {

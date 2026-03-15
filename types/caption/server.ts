@@ -1,4 +1,5 @@
 import { buildTextAlignmentExpr } from "../_helpers.ts";
+import { H264_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, escapeDrawtext, colorInputArgs } from "../../shared/ffmpeg.ts";
 import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
 
 export default {
@@ -8,15 +9,11 @@ export default {
     const duration = seg.duration || 3;
     const style = (seg.style || {}) as Record<string, unknown>;
     const fontSize = style["font-size"] || 48;
-    const color = (((style.color as string) || "#ffffff")).replace("#", "");
-    const bgColor = (((style.background as string) || ctx.defaultBg)).replace("#", "");
+    const color = hexToFFmpeg(style.color as string, "#ffffff");
+    const bgColor = hexToFFmpeg(style.background as string, ctx.defaultBg);
     const { xExpr, yExpr } = buildTextAlignmentExpr((style.align as string) || "center", (style.valign as string) || "middle");
 
-    const escapedText = (seg.text as string)
-      .replace(/\\/g, "\\\\\\\\")
-      .replace(/'/g, "\u2019")
-      .replace(/:/g, "\\:")
-      .replace(/%/g, "%%");
+    const escapedText = escapeDrawtext(seg.text as string);
 
     const fadeFilter = ctx.buildFadeFilter(seg, duration);
 
@@ -25,14 +22,11 @@ export default {
 
     await ctx.execFileAsync("ffmpeg", [
       "-y",
-      "-f", "lavfi",
-      "-i", `color=c=0x${bgColor}:s=${ctx.width}x${ctx.height}:d=${duration}:r=${ctx.fps}`,
+      ...colorInputArgs(bgColor, ctx.width, ctx.height, duration, ctx.fps),
       "-filter_script:v", filterScript,
-      "-c:v", "libx264",
-      "-preset", "fast",
-      "-pix_fmt", "yuv420p",
+      ...H264_ARGS,
       "-t", String(duration),
       outFile,
-    ], { maxBuffer: 50 * 1024 * 1024 });
+    ], FFMPEG_MAX_BUFFER);
   },
 } satisfies SegmentRenderer;

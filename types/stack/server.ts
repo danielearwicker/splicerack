@@ -1,3 +1,4 @@
+import { H264_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, colorInputArgs, probeJson } from "../../shared/ffmpeg.ts";
 import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
 
 export default {
@@ -5,17 +6,17 @@ export default {
 
   async render(seg: Segment, outFile: string, ctx: RenderContext): Promise<void> {
     const layers = (seg.layers || []) as Array<Record<string, unknown> & Segment>;
-    const bgColor = ((seg.background as string) || ctx.defaultBg).replace("#", "");
+    const bgColor = hexToFFmpeg(seg.background as string, ctx.defaultBg);
 
     if (layers.length === 0) {
       // Empty stack — render a blank frame
       const duration = seg.duration || 1;
       await ctx.execFileAsync("ffmpeg", [
-        "-y", "-f", "lavfi",
-        "-i", `color=c=0x${bgColor}:s=${ctx.width}x${ctx.height}:d=${duration}:r=${ctx.fps}`,
-        "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+        "-y",
+        ...colorInputArgs(bgColor, ctx.width, ctx.height, duration, ctx.fps),
+        ...H264_ARGS,
         "-t", String(duration), outFile,
-      ], { maxBuffer: 50 * 1024 * 1024 });
+      ], FFMPEG_MAX_BUFFER);
       return;
     }
 
@@ -47,10 +48,7 @@ export default {
     const layerDurations: number[] = [];
     for (let i = 0; i < layerFiles.length; i++) {
       try {
-        const { stdout } = await ctx.execFileAsync("ffprobe", [
-          "-v", "quiet", "-print_format", "json", "-show_format", layerFiles[i],
-        ]);
-        const info = JSON.parse(stdout as string);
+        const info = await probeJson(ctx.execFileAsync, layerFiles[i], "format");
         layerDurations.push(parseFloat(info.format.duration) || 5);
       } catch {
         layerDurations.push(5);
@@ -110,12 +108,10 @@ export default {
       ...inputs,
       "-filter_complex_script", filterScript,
       "-map", "[final]",
-      "-c:v", "libx264",
-      "-preset", "fast",
-      "-pix_fmt", "yuv420p",
+      ...H264_ARGS,
       "-t", String(totalDuration),
       outFile,
-    ], { maxBuffer: 50 * 1024 * 1024 });
+    ], FFMPEG_MAX_BUFFER);
 
     // Clean up layer temp files
     for (const f of layerFiles) {

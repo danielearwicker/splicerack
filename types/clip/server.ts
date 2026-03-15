@@ -1,4 +1,5 @@
 import { buildTextAlignmentExpr } from "../_helpers.ts";
+import { H264_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, escapeDrawtext, scalePadFilter } from "../../shared/ffmpeg.ts";
 import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
 
 export default {
@@ -26,22 +27,18 @@ export default {
           hasFont = true;
           const style = (ov.style || {}) as Record<string, unknown>;
           const fontSize = style["font-size"] || 36;
-          const color = (((style.color as string) || "#ffffff")).replace("#", "");
+          const color = hexToFFmpeg(style.color as string, "#ffffff");
           const ovAlign = (style.align as string) || "center";
           const ovValign = (style.valign as string) || "bottom";
           const { xExpr, yExpr } = buildTextAlignmentExpr(ovAlign, ovValign);
-          const escapedText = (ov.text as string)
-            .replace(/\\/g, "\\\\\\\\")
-            .replace(/'/g, "\u2019")
-            .replace(/:/g, "\\:")
-            .replace(/%/g, "%%");
+          const escapedText = escapeDrawtext(ov.text as string);
           overlayFilters += `,drawtext=fontfile='${ctx.defaultFont}':text='${escapedText}':fontsize=${fontSize}:fontcolor=0x${color}:x=${xExpr}:y=${yExpr}`;
         }
       }
     }
 
     const vfParts: string[] = [];
-    vfParts.push(`scale=${ctx.width}:${ctx.height}:force_original_aspect_ratio=decrease,pad=${ctx.width}:${ctx.height}:(ow-iw)/2:(oh-ih)/2`);
+    vfParts.push(scalePadFilter(ctx.width, ctx.height));
     if (speed !== 1.0) {
       vfParts.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
     }
@@ -65,15 +62,13 @@ export default {
       "-to", String(end),
       "-i", sourcePath,
       ...filterArgs,
-      "-c:v", "libx264",
-      "-preset", "fast",
-      "-pix_fmt", "yuv420p",
+      ...H264_ARGS,
       "-an",
       "-r", String(ctx.fps),
       outFile,
     ];
 
     // Always video-only — the audio mixer handles audio layers separately
-    await ctx.execFileAsync("ffmpeg", args, { maxBuffer: 50 * 1024 * 1024 });
+    await ctx.execFileAsync("ffmpeg", args, FFMPEG_MAX_BUFFER);
   },
 } satisfies SegmentRenderer;

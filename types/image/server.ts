@@ -1,3 +1,4 @@
+import { H264_ARGS, FFMPEG_MAX_BUFFER, scalePadFilter } from "../../shared/ffmpeg.ts";
 import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
 
 export default {
@@ -28,10 +29,10 @@ export default {
         const yEnd = to.y || 0;
         vf = `zoompan=z='${zStart}+(${zEnd}-${zStart})*on/${totalFrames}':x='${xStart}+(${xEnd}-${xStart})*on/${totalFrames}':y='${yStart}+(${yEnd}-${yStart})*on/${totalFrames}':d=${totalFrames}:s=${ctx.width}x${ctx.height}:fps=${ctx.fps}${fadeFilter}`;
       } else {
-        vf = `scale=${ctx.width}:${ctx.height}:force_original_aspect_ratio=decrease,pad=${ctx.width}:${ctx.height}:(ow-iw)/2:(oh-ih)/2${fadeFilter}`;
+        vf = `${scalePadFilter(ctx.width, ctx.height)}${fadeFilter}`;
       }
     } else {
-      vf = `scale=${ctx.width}:${ctx.height}:force_original_aspect_ratio=decrease,pad=${ctx.width}:${ctx.height}:(ow-iw)/2:(oh-ih)/2${fadeFilter}`;
+      vf = `${scalePadFilter(ctx.width, ctx.height)}${fadeFilter}`;
     }
 
     await ctx.execFileAsync("ffmpeg", [
@@ -39,12 +40,10 @@ export default {
       "-loop", "1",
       "-i", sourcePath,
       "-vf", vf,
-      "-c:v", "libx264",
-      "-preset", "fast",
-      "-pix_fmt", "yuv420p",
+      ...H264_ARGS,
       "-t", String(duration),
       "-r", String(ctx.fps),
       outFile,
-    ], { maxBuffer: 50 * 1024 * 1024 });
+    ], FFMPEG_MAX_BUFFER);
   },
 } satisfies SegmentRenderer;
