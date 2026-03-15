@@ -13,6 +13,27 @@ let externalTemplatesCache = {};
 let currentTemplateName = null;
 let currentTemplateData = null;
 
+// Undo/Redo
+const undoStack = [];
+const redoStack = [];
+const MAX_UNDO = 50;
+let undoInProgress = false;
+
+function pushUndo() {
+  if (undoInProgress || !projectData) return;
+  undoStack.push(JSON.stringify(projectData));
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  redoStack.length = 0; // clear redo on new change
+  updateUndoRedoButtons();
+}
+
+function updateUndoRedoButtons() {
+  const undoBtn = document.getElementById("btn-undo");
+  const redoBtn = document.getElementById("btn-redo");
+  if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+  if (redoBtn) redoBtn.disabled = redoStack.length === 0;
+}
+
 // Elements
 const dropZone = $("#drop-zone");
 const fileInput = $("#file-input");
@@ -616,6 +637,55 @@ const editorTemplateInfo = $("#editor-template-info");
 const editorFields = $("#editor-fields");
 
 $("#btn-close-editor").addEventListener("click", closeEditor);
+
+// Undo/Redo handlers
+$("#btn-undo").addEventListener("click", () => {
+  if (undoStack.length === 0 || !projectData) return;
+  undoInProgress = true;
+  redoStack.push(JSON.stringify(projectData));
+  projectData = JSON.parse(undoStack.pop());
+  syncAfterUndoRedo();
+  undoInProgress = false;
+  updateUndoRedoButtons();
+});
+
+$("#btn-redo").addEventListener("click", () => {
+  if (redoStack.length === 0 || !projectData) return;
+  undoInProgress = true;
+  undoStack.push(JSON.stringify(projectData));
+  projectData = JSON.parse(redoStack.pop());
+  syncAfterUndoRedo();
+  undoInProgress = false;
+  updateUndoRedoButtons();
+});
+
+function syncAfterUndoRedo() {
+  // Rebuild YAML from restored projectData without pushing to undo stack
+  // (undoInProgress is already true when this is called)
+  syncYamlFromData();
+  if (selectedSegmentIndex != null) {
+    if (selectedSegmentIndex < (projectData.timeline || []).length) {
+      renderEditorPanel(selectedSegmentIndex);
+    } else {
+      closeEditor();
+    }
+  }
+}
+
+// Keyboard shortcuts for undo/redo
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+    // Only handle if not typing in an input/textarea
+    if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+    e.preventDefault();
+    $("#btn-undo").click();
+  }
+  if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
+    if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+    e.preventDefault();
+    $("#btn-redo").click();
+  }
+});
 
 function closeEditor() {
   segmentEditor.style.display = "none";
@@ -1970,6 +2040,7 @@ function serializeObject(obj, indent) {
 
 // Update YAML text from the in-memory data and save
 function syncYamlFromData() {
+  pushUndo();
   const lines = [];
 
   // Output section

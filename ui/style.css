@@ -441,8 +441,19 @@ header h1 {
   font-size: 11px;
 }
 
-.timeline-toolbar button:hover {
+.timeline-toolbar button:hover:not(:disabled) {
   background: #1a5276;
+}
+
+.undo-redo-btn {
+  font-size: 14px !important;
+  padding: 2px 6px !important;
+  min-width: 28px;
+}
+
+.undo-redo-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 .timeline-body {
