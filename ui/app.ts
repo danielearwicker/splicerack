@@ -317,6 +317,14 @@ scrubber.addEventListener("input", () => {
   video.currentTime = Number(scrubber.value) / 1000;
 });
 
+// --- Step buttons ---
+for (const btn of $$(".step-btn")) {
+  btn.addEventListener("click", () => {
+    const step = parseFloat((btn as HTMLElement).dataset.step || "0");
+    video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + step));
+  });
+}
+
 // --- Clip marking ---
 $("#btn-mark-in")!.addEventListener("click", () => {
   markIn = video.currentTime;

@@ -159,6 +159,28 @@ header h1 {
   accent-color: #e94560;
 }
 
+.step-buttons-row {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.step-btn {
+  background: #0f3460;
+  color: #e0e0e0;
+  border: 1px solid #1a5276;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  min-width: 40px;
+}
+
+.step-btn:hover {
+  background: #1a5276;
+}
+
 .clip-mark-row {
   display: flex;
   align-items: center;
