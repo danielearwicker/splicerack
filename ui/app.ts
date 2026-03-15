@@ -1,6 +1,22 @@
 const $ = (sel: string) => document.querySelector(sel) as HTMLElement | null;
 const $$ = (sel: string) => document.querySelectorAll(sel);
 
+// --- DOM helpers ---
+function createOption(value: string, text: string, selected?: boolean): HTMLOptionElement {
+  const opt = document.createElement("option");
+  opt.value = value;
+  opt.textContent = text;
+  if (selected) opt.selected = true;
+  return opt;
+}
+
+function createOptgroup(label: string, options: Array<{ value: string; text: string; selected?: boolean }>): HTMLOptGroupElement {
+  const group = document.createElement("optgroup");
+  group.label = label;
+  for (const o of options) group.appendChild(createOption(o.value, o.text, o.selected));
+  return group;
+}
+
 // State
 let currentFile: string | null = null;
 let markIn: number | null = null;
@@ -419,13 +435,10 @@ async function loadProjects() {
   try {
     const res = await fetch("/api/projects");
     const data = await res.json();
-    projectSelect.innerHTML = '<option value="">-- Select project --</option>';
+    projectSelect.innerHTML = '';
+    projectSelect.appendChild(createOption("", "-- Select project --"));
     for (const f of data.files) {
-      const opt = document.createElement("option");
-      opt.value = f.name;
-      opt.textContent = f.name;
-      if (f.name === currentProject) opt.selected = true;
-      projectSelect.appendChild(opt);
+      projectSelect.appendChild(createOption(f.name, f.name, f.name === currentProject));
     }
   } catch (err) {
     console.error("Failed to load projects:", err);
@@ -662,11 +675,7 @@ function renderPropertyField(prop: any, displayValue: any, onChange: (val: any) 
   } else if (prop.type === "dropdown") {
     const sel = document.createElement("select");
     for (const o of prop.options) {
-      const opt = document.createElement("option");
-      opt.value = o;
-      opt.textContent = o;
-      if (String(displayValue) === o) opt.selected = true;
-      sel.appendChild(opt);
+      sel.appendChild(createOption(o, o, String(displayValue) === o));
     }
     sel.addEventListener("change", () => {
       const v = sel.value === "true" ? true : sel.value === "false" ? false : sel.value;
@@ -676,17 +685,10 @@ function renderPropertyField(prop: any, displayValue: any, onChange: (val: any) 
 
   } else if (prop.type === "file") {
     const sel = document.createElement("select");
-    const empty = document.createElement("option");
-    empty.value = "";
-    empty.textContent = "-- select file --";
-    sel.appendChild(empty);
+    sel.appendChild(createOption("", "-- select file --"));
     getLibraryFiles(prop.accept).then((files) => {
       for (const f of files) {
-        const opt = document.createElement("option");
-        opt.value = f.name;
-        opt.textContent = f.name;
-        if (displayValue === f.name) opt.selected = true;
-        sel.appendChild(opt);
+        sel.appendChild(createOption(f.name, f.name, displayValue === f.name));
       }
     });
     sel.addEventListener("change", () => onChange(sel.value));
@@ -694,18 +696,10 @@ function renderPropertyField(prop: any, displayValue: any, onChange: (val: any) 
 
   } else if (prop.type === "clip-dropdown") {
     const sel = document.createElement("select");
-    const empty = document.createElement("option");
-    empty.value = "";
-    empty.textContent = "-- manual start/end --";
-    sel.appendChild(empty);
-    // Populate from context — caller should set prop._sourceClips
+    sel.appendChild(createOption("", "-- manual start/end --"));
     if (prop._sourceClips) {
       for (const c of prop._sourceClips) {
-        const opt = document.createElement("option");
-        opt.value = c.name;
-        opt.textContent = `${c.name} (${formatTime(c.start)} - ${formatTime(c.end)})`;
-        if (displayValue === c.name) opt.selected = true;
-        sel.appendChild(opt);
+        sel.appendChild(createOption(c.name, `${c.name} (${formatTime(c.start)} - ${formatTime(c.end)})`, displayValue === c.name));
       }
     }
     sel.addEventListener("change", () => onChange(sel.value));
@@ -713,22 +707,12 @@ function renderPropertyField(prop: any, displayValue: any, onChange: (val: any) 
 
   } else if (prop.type === "voice-dropdown") {
     const sel = document.createElement("select");
-    const loading = document.createElement("option");
-    loading.value = displayValue || "";
-    loading.textContent = displayValue || "Loading voices...";
-    sel.appendChild(loading);
+    sel.appendChild(createOption(displayValue || "", displayValue || "Loading voices..."));
     getVoicesList().then((voices) => {
       sel.innerHTML = "";
-      const empty = document.createElement("option");
-      empty.value = "";
-      empty.textContent = "-- select voice --";
-      sel.appendChild(empty);
+      sel.appendChild(createOption("", "-- select voice --"));
       for (const v of voices) {
-        const opt = document.createElement("option");
-        opt.value = v.name;
-        opt.textContent = `${v.name} (${v.gender}, ${v.localeName})`;
-        if (displayValue === v.name) opt.selected = true;
-        sel.appendChild(opt);
+        sel.appendChild(createOption(v.name, `${v.name} (${v.gender}, ${v.localeName})`, displayValue === v.name));
       }
     });
     sel.addEventListener("change", () => onChange(sel.value));
@@ -736,17 +720,10 @@ function renderPropertyField(prop: any, displayValue: any, onChange: (val: any) 
 
   } else if (prop.type === "audio-file") {
     const sel = document.createElement("select");
-    const empty = document.createElement("option");
-    empty.value = "";
-    empty.textContent = "-- select audio --";
-    sel.appendChild(empty);
+    sel.appendChild(createOption("", "-- select audio --"));
     getAudioFiles().then((files) => {
       for (const f of files) {
-        const opt = document.createElement("option");
-        opt.value = f.name;
-        opt.textContent = f.name;
-        if (displayValue === f.name) opt.selected = true;
-        sel.appendChild(opt);
+        sel.appendChild(createOption(f.name, f.name, displayValue === f.name));
       }
     });
     sel.addEventListener("change", () => onChange(sel.value));
@@ -982,29 +959,15 @@ async function renderEditorPanel(index: number) {
 
   // Populate type dropdown
   editorTypeSelect.innerHTML = "";
-  const builtinGroup = document.createElement("optgroup");
-  builtinGroup.label = "Built-in";
-  for (const t of Object.keys(SpliceRack.types)) {
-    const opt = document.createElement("option");
-    opt.value = t;
-    opt.textContent = t;
-    if (rawSeg.type === t) opt.selected = true;
-    builtinGroup.appendChild(opt);
-  }
-  editorTypeSelect.appendChild(builtinGroup);
+  editorTypeSelect.appendChild(createOptgroup("Built-in",
+    Object.keys(SpliceRack.types).map(t => ({ value: t, text: t, selected: rawSeg.type === t }))
+  ));
 
   const templateNames = Object.keys(templates);
   if (templateNames.length > 0) {
-    const templateGroup = document.createElement("optgroup");
-    templateGroup.label = "Templates";
-    for (const name of templateNames) {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = `${name} (${templates[name].type || "?"})`;
-      if (rawSeg.type === name) opt.selected = true;
-      templateGroup.appendChild(opt);
-    }
-    editorTypeSelect.appendChild(templateGroup);
+    editorTypeSelect.appendChild(createOptgroup("Templates",
+      templateNames.map(name => ({ value: name, text: `${name} (${templates[name].type || "?"})`, selected: rawSeg.type === name }))
+    ));
   }
 
   // Template info banner
@@ -1122,32 +1085,16 @@ async function renderEditorPanel(index: number) {
         header.appendChild(num);
 
         const typeSelect = document.createElement("select");
-        // Built-in types
-        const builtinGroup = document.createElement("optgroup");
-        builtinGroup.label = "Built-in";
-        for (const t of Object.keys(SpliceRack.types)) {
-          if (t === "stack") continue; // prevent recursive stacks
-          const opt = document.createElement("option");
-          opt.value = t;
-          opt.textContent = t;
-          if (layer.type === t) opt.selected = true;
-          builtinGroup.appendChild(opt);
-        }
-        typeSelect.appendChild(builtinGroup);
-        // Templates (segment types only, excluding stack)
+        typeSelect.appendChild(createOptgroup("Built-in",
+          Object.keys(SpliceRack.types).filter(t => t !== "stack")
+            .map(t => ({ value: t, text: t, selected: layer.type === t }))
+        ));
         const layerTemplates = Object.entries(getMergedTemplates())
           .filter(([, v]) => (v as any).type && SpliceRack.types[(v as any).type] && (v as any).type !== "stack");
         if (layerTemplates.length > 0) {
-          const tmplGroup = document.createElement("optgroup");
-          tmplGroup.label = "Templates";
-          for (const [name, tmpl] of layerTemplates as [string, any][]) {
-            const opt = document.createElement("option");
-            opt.value = name;
-            opt.textContent = `${name} (${tmpl.type})`;
-            if (layer.type === name) opt.selected = true;
-            tmplGroup.appendChild(opt);
-          }
-          typeSelect.appendChild(tmplGroup);
+          typeSelect.appendChild(createOptgroup("Templates",
+            (layerTemplates as [string, any][]).map(([name, tmpl]) => ({ value: name, text: `${name} (${tmpl.type})`, selected: layer.type === name }))
+          ));
         }
         typeSelect.addEventListener("change", () => {
           const val = typeSelect.value;
@@ -1460,11 +1407,7 @@ function buildKeyframesEditor(segIndex: number, rawSeg: any) {
     easeRow.appendChild(easeLabel);
     const easeSel = document.createElement("select");
     for (const e of ["linear", "ease-in-out"]) {
-      const opt = document.createElement("option");
-      opt.value = e;
-      opt.textContent = e;
-      if ((kf.ease || "linear") === e) opt.selected = true;
-      easeSel.appendChild(opt);
+      easeSel.appendChild(createOption(e, e, (kf.ease || "linear") === e));
     }
     easeSel.addEventListener("change", () => {
       kf.ease = easeSel.value;
@@ -1553,11 +1496,7 @@ function buildAudioLayersEditor(segIndex: number, rawSeg: any) {
 
     for (const t of audioTypes) {
       if (t === "source" && resolvedSegType !== "clip") continue;
-      const opt = document.createElement("option");
-      opt.value = t;
-      opt.textContent = t;
-      if ((layer.type || "") === t) opt.selected = true;
-      typeSelect.appendChild(opt);
+      typeSelect.appendChild(createOption(t, t, (layer.type || "") === t));
     }
 
     // Audio templates from unified templates list
@@ -1567,16 +1506,9 @@ function buildAudioLayersEditor(segIndex: number, rawSeg: any) {
       (name) => AUDIO_BUILTIN.has(allTemplates[name].type)
     );
     if (audioTemplateNames.length > 0) {
-      const tGroup = document.createElement("optgroup");
-      tGroup.label = "Templates";
-      for (const name of audioTemplateNames) {
-        const opt = document.createElement("option");
-        opt.value = name;
-        opt.textContent = `${name} (${allTemplates[name].type})`;
-        if (layer.type === name) opt.selected = true;
-        tGroup.appendChild(opt);
-      }
-      typeSelect.appendChild(tGroup);
+      typeSelect.appendChild(createOptgroup("Templates",
+        audioTemplateNames.map(name => ({ value: name, text: `${name} (${allTemplates[name].type})`, selected: layer.type === name }))
+      ));
     }
 
     typeSelect.addEventListener("change", () => {
@@ -1988,29 +1920,15 @@ const addSegmentType = $("#add-segment-type") as HTMLSelectElement;
 
 function refreshAddSegmentDropdown() {
   addSegmentType.innerHTML = "";
-  // Built-in types
-  const builtinGroup = document.createElement("optgroup");
-  builtinGroup.label = "Built-in";
-  for (const t of Object.keys(SpliceRack.types)) {
-    const opt = document.createElement("option");
-    opt.value = t;
-    opt.textContent = t;
-    builtinGroup.appendChild(opt);
-  }
-  addSegmentType.appendChild(builtinGroup);
-  // Templates (segment types only — those with a type that maps to a built-in)
+  addSegmentType.appendChild(createOptgroup("Built-in",
+    Object.keys(SpliceRack.types).map(t => ({ value: t, text: t }))
+  ));
   const merged = getMergedTemplates();
   const segTemplates = Object.entries(merged).filter(([, v]) => SpliceRack.types[(v as any).type]);
   if (segTemplates.length > 0) {
-    const tmplGroup = document.createElement("optgroup");
-    tmplGroup.label = "Templates";
-    for (const [name, tmpl] of segTemplates as [string, any][]) {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = `${name} (${tmpl.type})`;
-      tmplGroup.appendChild(opt);
-    }
-    addSegmentType.appendChild(tmplGroup);
+    addSegmentType.appendChild(createOptgroup("Templates",
+      (segTemplates as [string, any][]).map(([name, tmpl]) => ({ value: name, text: `${name} (${tmpl.type})` }))
+    ));
   }
 }
 refreshAddSegmentDropdown();
@@ -2324,20 +2242,11 @@ function renderTemplateEditor() {
   // Populate type dropdown
   templateTypeSelect.innerHTML = "";
   for (const t of Object.keys(SpliceRack.types)) {
-    const opt = document.createElement("option");
-    opt.value = t;
-    opt.textContent = t;
-    if (currentTemplateData.type === t) opt.selected = true;
-    templateTypeSelect.appendChild(opt);
+    templateTypeSelect.appendChild(createOption(t, t, currentTemplateData.type === t));
   }
-  // Include audio types
   for (const t of ["tts", "file", "source"]) {
     if (!SpliceRack.types[t]) {
-      const opt = document.createElement("option");
-      opt.value = t;
-      opt.textContent = `${t} (audio)`;
-      if (currentTemplateData.type === t) opt.selected = true;
-      templateTypeSelect.appendChild(opt);
+      templateTypeSelect.appendChild(createOption(t, `${t} (audio)`, currentTemplateData.type === t));
     }
   }
 
@@ -2381,13 +2290,8 @@ function renderTemplateFields() {
       if (src) {
         getClipsForSource(src).then(() => {
           const clips = clipCache[src] || [];
-          const sel = el;
           for (const c of clips) {
-            const opt = document.createElement("option");
-            opt.value = c.name;
-            opt.textContent = `${c.name} (${formatTime(c.start)} - ${formatTime(c.end)})`;
-            if (displayVal === c.name) opt.selected = true;
-            sel.appendChild(opt);
+            el.appendChild(createOption(c.name, `${c.name} (${formatTime(c.start)} - ${formatTime(c.end)})`, displayVal === c.name));
           }
         });
       }

@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node --experimental-strip-types server.ts",
     "restart": "npx kill-port 3344 && sleep 1 && node --experimental-strip-types server.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {
     "express": "^4.21.0",

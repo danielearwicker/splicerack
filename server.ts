@@ -17,6 +17,7 @@ import { getVoices, synthesize } from "./services/tts.ts";
 import { deterministicHash } from "./shared/hash.ts";
 import { deepMerge } from "./shared/deep-merge.ts";
 import { H264_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, probeJson } from "./shared/ffmpeg.ts";
+import { loadYamlFile, listFilesByExt } from "./shared/yaml-utils.ts";
 import tsBlankSpace from "ts-blank-space";
 
 const execFileAsync = promisify(execFile);
@@ -395,12 +396,11 @@ app.get("/api/project/:filename", (req, res) => {
   if (!existsSync(filePath)) {
     return res.status(404).json({ error: "File not found" });
   }
-  const raw = readFileSync(filePath, "utf-8");
-  try {
-    const parsed = yaml.load(raw);
+  const { raw, parsed, error } = loadYamlFile(filePath);
+  if (error) {
+    res.json({ raw, error });
+  } else {
     res.json({ raw, parsed });
-  } catch (err) {
-    res.json({ raw, error: (err as Error).message });
   }
 });
 
@@ -491,11 +491,9 @@ app.post("/api/render/:filename", async (req, res) => {
     return res.status(404).json({ error: "File not found" });
   }
 
-  let project: any;
-  try {
-    project = yaml.load(readFileSync(filePath, "utf-8"));
-  } catch (err) {
-    return res.status(400).json({ error: "Invalid YAML: " + (err as Error).message });
+  const { parsed: project, error: yamlError } = loadYamlFile(filePath);
+  if (yamlError || !project) {
+    return res.status(400).json({ error: "Invalid YAML: " + (yamlError || "empty file") });
   }
 
   const outputSettings = project.output || {};
@@ -796,7 +794,7 @@ app.get("/api/render/status", (req, res) => {
 // --- Render cache management ---
 app.get("/api/cache", (req, res) => {
   try {
-    const files = readdirSync(CACHE_DIR).filter(f => f.endsWith(".mp4"));
+    const files = listFilesByExt(CACHE_DIR, [".mp4"]);
     const totalSize = files.reduce((sum, f) => sum + statSync(join(CACHE_DIR, f)).size, 0);
     res.json({ entries: files.length, totalSizeMB: (totalSize / 1024 / 1024).toFixed(1) });
   } catch (err) {
@@ -806,7 +804,7 @@ app.get("/api/cache", (req, res) => {
 
 app.delete("/api/cache", (req, res) => {
   try {
-    const files = readdirSync(CACHE_DIR).filter(f => f.endsWith(".mp4"));
+    const files = listFilesByExt(CACHE_DIR, [".mp4"]);
     for (const f of files) unlinkSync(join(CACHE_DIR, f));
     res.json({ ok: true, cleared: files.length });
   } catch (err) {
@@ -820,11 +818,10 @@ app.delete("/api/cache", (req, res) => {
 function loadExternalTemplates() {
   const templates: Record<string, any> = {};
   try {
-    const files = readdirSync(TEMPLATES_DIR).filter(f => f.endsWith(".yaml") || f.endsWith(".yml"));
+    const files = listFilesByExt(TEMPLATES_DIR, [".yaml", ".yml"]);
     for (const f of files) {
       try {
-        const raw = readFileSync(join(TEMPLATES_DIR, f), "utf-8");
-        const parsed = yaml.load(raw) as any;
+        const { parsed } = loadYamlFile(join(TEMPLATES_DIR, f));
         const name = f.replace(/\.ya?ml$/, "");
         if (parsed && typeof parsed === "object") {
           templates[name] = parsed;
@@ -855,8 +852,8 @@ app.get("/api/template/:name", (req, res) => {
   const filePath = join(TEMPLATES_DIR, `${name}.yaml`);
   if (!existsSync(filePath)) return res.status(404).json({ error: "Template not found" });
   try {
-    const raw = readFileSync(filePath, "utf-8");
-    const parsed = yaml.load(raw);
+    const { raw, parsed, error } = loadYamlFile(filePath);
+    if (error) return res.status(500).json({ error });
     res.json({ name, raw, parsed });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
