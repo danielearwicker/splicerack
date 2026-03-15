@@ -20,6 +20,19 @@ declare global {
   function getVoicesList(): Promise<Array<{name: string; displayName: string; locale: string; gender: string; localeName: string}>>;
   function getAudioFiles(): Promise<Array<{name: string; size: number; modified: string}>>;
   function renderPropertyField(prop: PropertySchema & { _sourceClips?: ClipDef[] }, displayValue: any, onChange: (val: any) => void): HTMLElement;
+  interface CardListConfig {
+    headerText?: string;
+    items: any[];
+    addButtonText: string;
+    canReorder?: boolean;
+    onChanged: () => void;
+    renderItemHeader: (item: any, index: number, header: HTMLElement) => void;
+    renderItemBody: (item: any, index: number, card: HTMLElement) => void;
+    onDelete?: (items: any[], index: number) => void;
+    onAdd: () => void;
+    extraItemActions?: (item: any, index: number) => HTMLElement[];
+  }
+  function buildCardList(config: CardListConfig): HTMLElement;
   function getMergedTemplates(): Record<string, Record<string, unknown>>;
   function syncYamlFromData(): void;
   function renderEditorPanel(index: number): Promise<void>;

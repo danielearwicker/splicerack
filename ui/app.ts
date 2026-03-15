@@ -1064,205 +1064,147 @@ async function renderEditorPanel(index: number) {
       });
       row.appendChild(el);
     } else if (prop.type === "layers") {
-      // Layers editor — renders as a list of layer cards
-      const layersContainer = document.createElement("div");
-      layersContainer.style.padding = "0 12px 4px";
-
+      // Layers editor — uses shared card list builder
       const layersValue = getNestedValue(resolvedSeg, prop.key) || [];
+      const onChanged = () => { syncYamlFromData(); renderEditorPanel(index); };
 
-      for (let li = 0; li < layersValue.length; li++) {
-        const layer = layersValue[li];
-        const card = document.createElement("div");
-        card.className = "layer-card";
-
-        // Header: layer number, type dropdown, move/delete buttons
-        const header = document.createElement("div");
-        header.className = "layer-card-header";
-
-        const num = document.createElement("span");
-        num.className = "layer-num";
-        num.textContent = `${li + 1}`;
-        header.appendChild(num);
-
-        const typeSelect = document.createElement("select");
-        typeSelect.appendChild(createOptgroup("Built-in",
-          Object.keys(SpliceRack.types).filter(t => t !== "stack")
-            .map(t => ({ value: t, text: t, selected: layer.type === t }))
-        ));
-        const layerTemplates = Object.entries(getMergedTemplates())
-          .filter(([, v]) => (v as any).type && SpliceRack.types[(v as any).type] && (v as any).type !== "stack");
-        if (layerTemplates.length > 0) {
-          typeSelect.appendChild(createOptgroup("Templates",
-            (layerTemplates as [string, any][]).map(([name, tmpl]) => ({ value: name, text: `${name} (${tmpl.type})`, selected: layer.type === name }))
+      editorFields.appendChild(buildCardList({
+        items: layersValue,
+        addButtonText: "+ Add Layer",
+        onChanged,
+        renderItemHeader: (layer: any, li: number, header: HTMLElement) => {
+          const typeSelect = document.createElement("select");
+          typeSelect.appendChild(createOptgroup("Built-in",
+            Object.keys(SpliceRack.types).filter(t => t !== "stack")
+              .map(t => ({ value: t, text: t, selected: layer.type === t }))
           ));
-        }
-        typeSelect.addEventListener("change", () => {
-          const val = typeSelect.value;
-          const typeDef = SpliceRack.types[val];
-          let newLayer;
-          if (typeDef) {
-            newLayer = typeDef.defaults();
-          } else {
-            // Template — just set the type name
-            newLayer = { type: val };
+          const layerTemplates = Object.entries(getMergedTemplates())
+            .filter(([, v]) => (v as any).type && SpliceRack.types[(v as any).type] && (v as any).type !== "stack");
+          if (layerTemplates.length > 0) {
+            typeSelect.appendChild(createOptgroup("Templates",
+              (layerTemplates as [string, any][]).map(([name, tmpl]) => ({ value: name, text: `${name} (${tmpl.type})`, selected: layer.type === name }))
+            ));
           }
-          newLayer.opacity = layer.opacity != null ? layer.opacity : 1;
-          newLayer.delay = layer.delay || 0;
-          layersValue[li] = newLayer;
-          syncYamlFromData();
-          renderEditorPanel(index);
-        });
-        header.appendChild(typeSelect);
-
-        const actions = document.createElement("span");
-        actions.className = "layer-actions";
-        if (li > 0) {
-          const upBtn = document.createElement("button");
-          upBtn.textContent = "\u2191";
-          upBtn.addEventListener("click", () => {
-            [layersValue[li - 1], layersValue[li]] = [layersValue[li], layersValue[li - 1]];
-            syncYamlFromData();
-            renderEditorPanel(index);
-          });
-          actions.appendChild(upBtn);
-        }
-        if (li < layersValue.length - 1) {
-          const downBtn = document.createElement("button");
-          downBtn.textContent = "\u2193";
-          downBtn.addEventListener("click", () => {
-            [layersValue[li], layersValue[li + 1]] = [layersValue[li + 1], layersValue[li]];
-            syncYamlFromData();
-            renderEditorPanel(index);
-          });
-          actions.appendChild(downBtn);
-        }
-        const unstackBtn = document.createElement("button");
-        unstackBtn.textContent = "Unstack";
-        unstackBtn.title = "Replace the stack with this layer";
-        unstackBtn.addEventListener("click", () => {
-          const layerSeg = { ...layersValue[li] };
-          delete layerSeg.opacity;
-          delete layerSeg.delay;
-          projectData.timeline[index] = layerSeg;
-          syncYamlFromData();
-          renderEditorPanel(index);
-        });
-        actions.appendChild(unstackBtn);
-
-        const delBtn = document.createElement("button");
-        delBtn.className = "layer-delete";
-        delBtn.textContent = "\u00D7";
-        delBtn.addEventListener("click", () => {
-          layersValue.splice(li, 1);
-          syncYamlFromData();
-          renderEditorPanel(index);
-        });
-        actions.appendChild(delBtn);
-        header.appendChild(actions);
-        card.appendChild(header);
-
-        // Stack-specific per-layer props: opacity and delay
-        const stackProps = document.createElement("div");
-        stackProps.className = "layer-stack-props";
-
-        const opLabel = document.createElement("label");
-        opLabel.textContent = "Opacity";
-        const opInput = document.createElement("input");
-        opInput.type = "number";
-        opInput.min = "0";
-        opInput.max = "1";
-        opInput.step = "0.1";
-        opInput.value = layer.opacity != null ? layer.opacity : 1;
-        opInput.addEventListener("change", () => {
-          layer.opacity = parseFloat(opInput.value);
-          syncYamlFromData();
-        });
-        stackProps.appendChild(opLabel);
-        stackProps.appendChild(opInput);
-
-        const delayLabel = document.createElement("label");
-        delayLabel.textContent = "Delay";
-        const delayInput = document.createElement("input");
-        delayInput.type = "number";
-        delayInput.min = "0";
-        delayInput.step = "0.1";
-        delayInput.value = layer.delay || 0;
-        delayInput.addEventListener("change", () => {
-          layer.delay = parseFloat(delayInput.value);
-          syncYamlFromData();
-        });
-        stackProps.appendChild(delayLabel);
-        stackProps.appendChild(delayInput);
-
-        card.appendChild(stackProps);
-
-        // Sub-properties from the layer's type schema (resolve templates)
-        const layerIsTemplate = !SpliceRack.types[layer.type] && getMergedTemplates()[layer.type];
-        const resolvedLayer = layerIsTemplate
-          ? resolveTemplate(layer, getMergedTemplates())
-          : layer;
-        const resolvedLayerType = resolvedLayer.type;
-        const layerTypeDef = SpliceRack.types[resolvedLayerType];
-        if (layerTypeDef && layerTypeDef.schema) {
-          const subProps = document.createElement("div");
-          subProps.className = "layer-subprops";
-
-          for (const sp of layerTypeDef.schema) {
-            if (sp.condition && !sp.condition(resolvedLayer)) continue;
-            const subRow = document.createElement("div");
-            subRow.className = "prop-row";
-
-            const subLabel = document.createElement("label");
-            subLabel.textContent = sp.label;
-            subRow.appendChild(subLabel);
-
-            const val = getNestedValue(resolvedLayer, sp.key);
-            const displayVal = val != null ? val : sp.default;
-
-            if (sp.type === "clip-dropdown") {
-              const clipProp = { ...sp, _sourceClips: clipCache[getNestedValue(layer, "source") as string] || [] };
-              const el = renderPropertyField(clipProp, displayVal, (val: any) => {
-                if (val) { layer.clip = val; delete layer.start; delete layer.end; }
-                else { delete layer.clip; layer.start = 0; layer.end = 10; }
-                syncYamlFromData();
-                renderEditorPanel(index);
-              });
-              subRow.appendChild(el);
+          typeSelect.addEventListener("change", () => {
+            const val = typeSelect.value;
+            const typeDef = SpliceRack.types[val];
+            let newLayer: any;
+            if (typeDef) {
+              newLayer = typeDef.defaults();
             } else {
-              const el = renderPropertyField(sp, displayVal, (val: any) => {
-                setNestedValue(layer, sp.key, val);
-                syncYamlFromData();
-                if (sp.type === "file" || sp.type === "dropdown") renderEditorPanel(index);
-              });
-              subRow.appendChild(el);
+              newLayer = { type: val };
             }
+            newLayer.opacity = layer.opacity != null ? layer.opacity : 1;
+            newLayer.delay = layer.delay || 0;
+            layersValue[li] = newLayer;
+            onChanged();
+          });
+          header.appendChild(typeSelect);
+        },
+        renderItemBody: (layer: any, li: number, card: HTMLElement) => {
+          // Stack-specific per-layer props: opacity and delay
+          const stackProps = document.createElement("div");
+          stackProps.className = "layer-stack-props";
 
-            subProps.appendChild(subRow);
+          const opLabel = document.createElement("label");
+          opLabel.textContent = "Opacity";
+          const opInput = document.createElement("input");
+          opInput.type = "number";
+          opInput.min = "0";
+          opInput.max = "1";
+          opInput.step = "0.1";
+          opInput.value = layer.opacity != null ? layer.opacity : 1;
+          opInput.addEventListener("change", () => {
+            layer.opacity = parseFloat(opInput.value);
+            syncYamlFromData();
+          });
+          stackProps.appendChild(opLabel);
+          stackProps.appendChild(opInput);
+
+          const delayLabel = document.createElement("label");
+          delayLabel.textContent = "Delay";
+          const delayInput = document.createElement("input");
+          delayInput.type = "number";
+          delayInput.min = "0";
+          delayInput.step = "0.1";
+          delayInput.value = layer.delay || 0;
+          delayInput.addEventListener("change", () => {
+            layer.delay = parseFloat(delayInput.value);
+            syncYamlFromData();
+          });
+          stackProps.appendChild(delayLabel);
+          stackProps.appendChild(delayInput);
+          card.appendChild(stackProps);
+
+          // Sub-properties from the layer's type schema (resolve templates)
+          const layerIsTemplate = !SpliceRack.types[layer.type] && getMergedTemplates()[layer.type];
+          const resolvedLayer = layerIsTemplate
+            ? resolveTemplate(layer, getMergedTemplates())
+            : layer;
+          const resolvedLayerType = resolvedLayer.type;
+          const layerTypeDef = SpliceRack.types[resolvedLayerType];
+          if (layerTypeDef && layerTypeDef.schema) {
+            const subProps = document.createElement("div");
+            subProps.className = "layer-subprops";
+
+            for (const sp of layerTypeDef.schema) {
+              if (sp.condition && !sp.condition(resolvedLayer)) continue;
+              const subRow = document.createElement("div");
+              subRow.className = "prop-row";
+
+              const subLabel = document.createElement("label");
+              subLabel.textContent = sp.label;
+              subRow.appendChild(subLabel);
+
+              const val = getNestedValue(resolvedLayer, sp.key);
+              const displayVal = val != null ? val : sp.default;
+
+              if (sp.type === "clip-dropdown") {
+                const clipProp = { ...sp, _sourceClips: clipCache[getNestedValue(layer, "source") as string] || [] };
+                const el = renderPropertyField(clipProp, displayVal, (val: any) => {
+                  if (val) { layer.clip = val; delete layer.start; delete layer.end; }
+                  else { delete layer.clip; layer.start = 0; layer.end = 10; }
+                  onChanged();
+                });
+                subRow.appendChild(el);
+              } else {
+                const el = renderPropertyField(sp, displayVal, (val: any) => {
+                  setNestedValue(layer, sp.key, val);
+                  syncYamlFromData();
+                  if (sp.type === "file" || sp.type === "dropdown") renderEditorPanel(index);
+                });
+                subRow.appendChild(el);
+              }
+
+              subProps.appendChild(subRow);
+            }
+            card.appendChild(subProps);
           }
-          card.appendChild(subProps);
-        }
-
-        layersContainer.appendChild(card);
-      }
-
-      // Add layer button
-      const addBtn = document.createElement("button");
-      addBtn.className = "layers-add-btn";
-      addBtn.textContent = "+ Add Layer";
-      addBtn.addEventListener("click", () => {
-        const defaultType = "caption";
-        const newLayer = SpliceRack.types[defaultType].defaults();
-        newLayer.opacity = 1;
-        newLayer.delay = 0;
-        layersValue.push(newLayer);
-        setNestedValue(projectData.timeline[index], prop.key, layersValue);
-        syncYamlFromData();
-        renderEditorPanel(index);
-      });
-      layersContainer.appendChild(addBtn);
-
+        },
+        extraItemActions: (layer: any, li: number) => {
+          const unstackBtn = document.createElement("button");
+          unstackBtn.textContent = "Unstack";
+          unstackBtn.title = "Replace the stack with this layer";
+          unstackBtn.addEventListener("click", () => {
+            const layerSeg = { ...layersValue[li] };
+            delete layerSeg.opacity;
+            delete layerSeg.delay;
+            projectData.timeline[index] = layerSeg;
+            onChanged();
+          });
+          return [unstackBtn];
+        },
+        onAdd: () => {
+          const defaultType = "caption";
+          const newLayer = SpliceRack.types[defaultType].defaults();
+          newLayer.opacity = 1;
+          newLayer.delay = 0;
+          layersValue.push(newLayer);
+          setNestedValue(projectData.timeline[index], prop.key, layersValue);
+          onChanged();
+        },
+      }));
       // Layers take the full width — skip the normal row layout
-      editorFields.appendChild(layersContainer);
       continue;
     }
 
@@ -1302,139 +1244,88 @@ async function renderEditorPanel(index: number) {
 }
 
 function buildKeyframesEditor(segIndex: number, rawSeg: any) {
-  const container = document.createElement("div");
-  container.style.padding = "0 12px 8px";
-
-  const header = document.createElement("div");
-  header.className = "prop-group-header";
-  header.textContent = "Keyframes";
-  container.appendChild(header);
-
   const keyframes = rawSeg.keyframes || [];
+  const onChanged = () => { syncYamlFromData(); renderEditorPanel(segIndex); };
 
-  for (let ki = 0; ki < keyframes.length; ki++) {
-    const kf = keyframes[ki];
-    const card = document.createElement("div");
-    card.className = "layer-card";
+  // Shared between renderItemHeader and renderItemBody so body can update header labels
+  const timeLabels: HTMLElement[] = [];
 
-    const cardHeader = document.createElement("div");
-    cardHeader.className = "layer-card-header";
+  return buildCardList({
+    headerText: "Keyframes",
+    items: keyframes,
+    addButtonText: "+ Add Keyframe",
+    onChanged,
+    onDelete: (items, ki) => {
+      items.splice(ki, 1);
+      if (items.length === 0) delete rawSeg.keyframes;
+    },
+    renderItemHeader: (kf: any, ki: number, header: HTMLElement) => {
+      const timeLabel = document.createElement("span");
+      timeLabel.style.cssText = "font-size:11px;color:#a0a0b0";
+      timeLabel.textContent = `t=${kf.time || 0}s  scale=${kf.scale || 1}x`;
+      timeLabels[ki] = timeLabel;
+      header.appendChild(timeLabel);
+    },
+    renderItemBody: (kf: any, ki: number, card: HTMLElement) => {
+      const fields = [
+        { key: "time", label: "Time (s)", step: 0.1, min: 0 },
+        { key: "scale", label: "Scale", step: 0.1, min: 0.1, max: 20 },
+        { key: "x", label: "X (0-1)", step: 0.01, min: 0, max: 1 },
+        { key: "y", label: "Y (0-1)", step: 0.01, min: 0, max: 1 },
+      ];
 
-    const num = document.createElement("span");
-    num.className = "layer-num";
-    num.textContent = `${ki + 1}`;
-    cardHeader.appendChild(num);
+      const subProps = document.createElement("div");
+      subProps.className = "layer-subprops";
 
-    const timeLabel = document.createElement("span");
-    timeLabel.style.cssText = "font-size:11px;color:#a0a0b0";
-    timeLabel.textContent = `t=${kf.time || 0}s  scale=${kf.scale || 1}x`;
-    cardHeader.appendChild(timeLabel);
+      for (const f of fields) {
+        const row = document.createElement("div");
+        row.className = "prop-row";
+        const label = document.createElement("label");
+        label.textContent = f.label;
+        row.appendChild(label);
 
-    const actions = document.createElement("span");
-    actions.className = "layer-actions";
-    if (ki > 0) {
-      const upBtn = document.createElement("button");
-      upBtn.textContent = "\u2191";
-      upBtn.addEventListener("click", () => {
-        [keyframes[ki - 1], keyframes[ki]] = [keyframes[ki], keyframes[ki - 1]];
-        syncYamlFromData();
-        renderEditorPanel(segIndex);
-      });
-      actions.appendChild(upBtn);
-    }
-    if (ki < keyframes.length - 1) {
-      const downBtn = document.createElement("button");
-      downBtn.textContent = "\u2193";
-      downBtn.addEventListener("click", () => {
-        [keyframes[ki], keyframes[ki + 1]] = [keyframes[ki + 1], keyframes[ki]];
-        syncYamlFromData();
-        renderEditorPanel(segIndex);
-      });
-      actions.appendChild(downBtn);
-    }
-    const delBtn = document.createElement("button");
-    delBtn.className = "layer-delete";
-    delBtn.textContent = "\u00D7";
-    delBtn.addEventListener("click", () => {
-      keyframes.splice(ki, 1);
-      if (keyframes.length === 0) delete rawSeg.keyframes;
-      syncYamlFromData();
-      renderEditorPanel(segIndex);
-    });
-    actions.appendChild(delBtn);
-    cardHeader.appendChild(actions);
-    card.appendChild(cardHeader);
+        const input = document.createElement("input");
+        input.type = "number";
+        input.value = kf[f.key] != null ? kf[f.key] : (f.key === "scale" ? 1 : f.key === "x" || f.key === "y" ? 0.5 : 0);
+        if (f.step != null) input.step = String(f.step);
+        if (f.min != null) input.min = String(f.min);
+        if (f.max != null) input.max = String(f.max);
+        input.addEventListener("change", () => {
+          kf[f.key] = parseFloat(input.value);
+          const tl = timeLabels[ki];
+          if (tl) tl.textContent = `t=${kf.time || 0}s  scale=${kf.scale || 1}x`;
+          syncYamlFromData();
+        });
+        row.appendChild(input);
+        subProps.appendChild(row);
+      }
 
-    // Keyframe fields
-    const fields = [
-      { key: "time", label: "Time (s)", step: 0.1, min: 0 },
-      { key: "scale", label: "Scale", step: 0.1, min: 0.1, max: 20 },
-      { key: "x", label: "X (0-1)", step: 0.01, min: 0, max: 1 },
-      { key: "y", label: "Y (0-1)", step: 0.01, min: 0, max: 1 },
-    ];
-
-    const subProps = document.createElement("div");
-    subProps.className = "layer-subprops";
-
-    for (const f of fields) {
-      const row = document.createElement("div");
-      row.className = "prop-row";
-      const label = document.createElement("label");
-      label.textContent = f.label;
-      row.appendChild(label);
-
-      const input = document.createElement("input");
-      input.type = "number";
-      input.value = kf[f.key] != null ? kf[f.key] : (f.key === "scale" ? 1 : f.key === "x" || f.key === "y" ? 0.5 : 0);
-      if (f.step != null) input.step = String(f.step);
-      if (f.min != null) input.min = String(f.min);
-      if (f.max != null) input.max = String(f.max);
-      input.addEventListener("change", () => {
-        kf[f.key] = parseFloat(input.value);
-        // Update the summary label
-        timeLabel.textContent = `t=${kf.time || 0}s  scale=${kf.scale || 1}x`;
+      // Ease dropdown
+      const easeRow = document.createElement("div");
+      easeRow.className = "prop-row";
+      const easeLabel = document.createElement("label");
+      easeLabel.textContent = "Ease";
+      easeRow.appendChild(easeLabel);
+      const easeSel = document.createElement("select");
+      for (const e of ["linear", "ease-in-out"]) {
+        easeSel.appendChild(createOption(e, e, (kf.ease || "linear") === e));
+      }
+      easeSel.addEventListener("change", () => {
+        kf.ease = easeSel.value;
         syncYamlFromData();
       });
-      row.appendChild(input);
-      subProps.appendChild(row);
-    }
+      easeRow.appendChild(easeSel);
+      subProps.appendChild(easeRow);
 
-    // Ease dropdown
-    const easeRow = document.createElement("div");
-    easeRow.className = "prop-row";
-    const easeLabel = document.createElement("label");
-    easeLabel.textContent = "Ease";
-    easeRow.appendChild(easeLabel);
-    const easeSel = document.createElement("select");
-    for (const e of ["linear", "ease-in-out"]) {
-      easeSel.appendChild(createOption(e, e, (kf.ease || "linear") === e));
-    }
-    easeSel.addEventListener("change", () => {
-      kf.ease = easeSel.value;
-      syncYamlFromData();
-    });
-    easeRow.appendChild(easeSel);
-    subProps.appendChild(easeRow);
-
-    card.appendChild(subProps);
-    container.appendChild(card);
-  }
-
-  // Add keyframe button
-  const addBtn = document.createElement("button");
-  addBtn.className = "layers-add-btn";
-  addBtn.textContent = "+ Add Keyframe";
-  addBtn.addEventListener("click", () => {
-    if (!rawSeg.keyframes) rawSeg.keyframes = [];
-    // Default: time after last keyframe, centered, no zoom
-    const lastTime = rawSeg.keyframes.length > 0 ? rawSeg.keyframes[rawSeg.keyframes.length - 1].time || 0 : 0;
-    rawSeg.keyframes.push({ time: lastTime + 2, scale: 1, x: 0.5, y: 0.5 });
-    syncYamlFromData();
-    renderEditorPanel(segIndex);
+      card.appendChild(subProps);
+    },
+    onAdd: () => {
+      if (!rawSeg.keyframes) rawSeg.keyframes = [];
+      const lastTime = rawSeg.keyframes.length > 0 ? rawSeg.keyframes[rawSeg.keyframes.length - 1].time || 0 : 0;
+      rawSeg.keyframes.push({ time: lastTime + 2, scale: 1, x: 0.5, y: 0.5 });
+      onChanged();
+    },
   });
-  container.appendChild(addBtn);
-
-  return container;
 }
 
 // Audio layer type schemas
@@ -1461,171 +1352,127 @@ const AUDIO_LAYER_SCHEMAS: Record<string, any[]> = {
 // voicesCache and audioFilesCache moved to async cache factory at top of file
 
 function buildAudioLayersEditor(segIndex: number, rawSeg: any) {
-  const container = document.createElement("div");
-  container.style.padding = "0 12px 8px";
-
-  const header = document.createElement("div");
-  header.className = "prop-group-header";
-  header.textContent = "Audio";
-  container.appendChild(header);
-
   const audioLayers = rawSeg.audio || [];
+  const onChanged = () => { syncYamlFromData(); renderEditorPanel(segIndex); };
+  const AUDIO_BUILTIN = new Set(["source", "tts", "file"]);
+  const allTemplates = projectData.templates || {};
 
-  for (let ai = 0; ai < audioLayers.length; ai++) {
-    const layer = audioLayers[ai];
-    const card = document.createElement("div");
-    card.className = "layer-card";
+  return buildCardList({
+    headerText: "Audio",
+    items: audioLayers,
+    addButtonText: "+ Add Audio Layer",
+    canReorder: false,
+    onChanged,
+    onDelete: (items, ai) => {
+      items.splice(ai, 1);
+      if (items.length === 0) delete rawSeg.audio;
+    },
+    renderItemHeader: (layer: any, ai: number, header: HTMLElement) => {
+      const typeSelect = document.createElement("select");
+      const audioTypes = ["source", "tts", "file"];
 
-    // Header row
-    const cardHeader = document.createElement("div");
-    cardHeader.className = "layer-card-header";
+      const segType = rawSeg.type;
+      const resolvedSegType = isKnownType(segType) ? segType :
+        (getMergedTemplates()[segType] || {}).type || segType;
 
-    const num = document.createElement("span");
-    num.className = "layer-num";
-    num.textContent = `${ai + 1}`;
-    cardHeader.appendChild(num);
-
-    // Type dropdown (source/tts/file + audio templates)
-    const typeSelect = document.createElement("select");
-    const audioTypes = ["source", "tts", "file"];
-
-    // Only show "source" for clip segments
-    const segType = rawSeg.type;
-    const resolvedSegType = isKnownType(segType) ? segType :
-      (getMergedTemplates()[segType] || {}).type || segType;
-
-    for (const t of audioTypes) {
-      if (t === "source" && resolvedSegType !== "clip") continue;
-      typeSelect.appendChild(createOption(t, t, (layer.type || "") === t));
-    }
-
-    // Audio templates from unified templates list
-    const AUDIO_BUILTIN = new Set(["source", "tts", "file"]);
-    const allTemplates = projectData.templates || {};
-    const audioTemplateNames = Object.keys(allTemplates).filter(
-      (name) => AUDIO_BUILTIN.has(allTemplates[name].type)
-    );
-    if (audioTemplateNames.length > 0) {
-      typeSelect.appendChild(createOptgroup("Templates",
-        audioTemplateNames.map(name => ({ value: name, text: `${name} (${allTemplates[name].type})`, selected: layer.type === name }))
-      ));
-    }
-
-    typeSelect.addEventListener("change", () => {
-      const val = typeSelect.value;
-      if (!AUDIO_BUILTIN.has(val) && allTemplates[val]) {
-        // Template-based audio layer — just set type, overrides come from user
-        audioLayers[ai] = { type: val };
-      } else {
-        const newLayer: any = { type: val };
-        if (val === "source") { newLayer.volume = 1; }
-        else if (val === "tts") { newLayer.text = ""; newLayer.voice = ""; newLayer.volume = 1; }
-        else if (val === "file") { newLayer.source = ""; newLayer.volume = 1; }
-        audioLayers[ai] = newLayer;
+      for (const t of audioTypes) {
+        if (t === "source" && resolvedSegType !== "clip") continue;
+        typeSelect.appendChild(createOption(t, t, (layer.type || "") === t));
       }
-      if (!rawSeg.audio) rawSeg.audio = audioLayers;
-      syncYamlFromData();
-      renderEditorPanel(segIndex);
-    });
-    cardHeader.appendChild(typeSelect);
 
-    // Delete button
-    const actions = document.createElement("span");
-    actions.className = "layer-actions";
-    const delBtn = document.createElement("button");
-    delBtn.className = "layer-delete";
-    delBtn.textContent = "\u00D7";
-    delBtn.addEventListener("click", () => {
-      audioLayers.splice(ai, 1);
-      if (audioLayers.length === 0) delete rawSeg.audio;
-      syncYamlFromData();
-      renderEditorPanel(segIndex);
-    });
-    actions.appendChild(delBtn);
-    cardHeader.appendChild(actions);
-    card.appendChild(cardHeader);
+      const audioTemplateNames = Object.keys(allTemplates).filter(
+        (name) => AUDIO_BUILTIN.has(allTemplates[name].type)
+      );
+      if (audioTemplateNames.length > 0) {
+        typeSelect.appendChild(createOptgroup("Templates",
+          audioTemplateNames.map(name => ({ value: name, text: `${name} (${allTemplates[name].type})`, selected: layer.type === name }))
+        ));
+      }
 
-    // Resolve template if type is not a built-in audio type
-    const isAudioTemplate = layer.type && !AUDIO_BUILTIN.has(layer.type) && allTemplates[layer.type];
-    const resolvedLayer = isAudioTemplate
-      ? { ...allTemplates[layer.type], ...layer, type: allTemplates[layer.type].type }
-      : layer;
-    const layerType = resolvedLayer.type;
-    const schema = AUDIO_LAYER_SCHEMAS[layerType];
-
-    if (isAudioTemplate) {
-      const tmplInfo = document.createElement("div");
-      tmplInfo.className = "editor-template-info";
-      tmplInfo.style.margin = "2px 0";
-      tmplInfo.style.borderRadius = "3px";
-      tmplInfo.textContent = `Template: ${layer.type}`;
-      card.appendChild(tmplInfo);
-    }
-
-    // Render schema fields for this audio layer type
-    if (schema) {
-      const subProps = document.createElement("div");
-      subProps.className = "layer-subprops";
-
-      for (const sp of schema) {
-        const subRow = document.createElement("div");
-        subRow.className = "prop-row";
-
-        const subLabel = document.createElement("label");
-        subLabel.textContent = sp.label;
-        subRow.appendChild(subLabel);
-
-        const val = resolvedLayer[sp.key];
-        const displayVal = val != null ? val : sp.default;
-        const isInherited = isAudioTemplate && layer[sp.key] === undefined;
-        if (isInherited) subRow.classList.add("prop-inherited");
-
-        const el = renderPropertyField(sp, displayVal, (val: any) => {
-          layer[sp.key] = val;
-          syncYamlFromData();
-        });
-        subRow.appendChild(el);
-
-        // Revert button for template overrides
-        if (isAudioTemplate && layer[sp.key] !== undefined) {
-          const revertBtn = document.createElement("button");
-          revertBtn.className = "prop-revert";
-          revertBtn.textContent = "\u21A9";
-          revertBtn.title = "Revert to template value";
-          revertBtn.addEventListener("click", () => {
-            delete layer[sp.key];
-            syncYamlFromData();
-            renderEditorPanel(segIndex);
-          });
-          subRow.appendChild(revertBtn);
-        } else if (isInherited) {
-          const lbl = document.createElement("span");
-          lbl.className = "prop-inherit-label";
-          lbl.textContent = "template";
-          subRow.appendChild(lbl);
+      typeSelect.addEventListener("change", () => {
+        const val = typeSelect.value;
+        if (!AUDIO_BUILTIN.has(val) && allTemplates[val]) {
+          audioLayers[ai] = { type: val };
+        } else {
+          const newLayer: any = { type: val };
+          if (val === "source") { newLayer.volume = 1; }
+          else if (val === "tts") { newLayer.text = ""; newLayer.voice = ""; newLayer.volume = 1; }
+          else if (val === "file") { newLayer.source = ""; newLayer.volume = 1; }
+          audioLayers[ai] = newLayer;
         }
+        if (!rawSeg.audio) rawSeg.audio = audioLayers;
+        onChanged();
+      });
+      header.appendChild(typeSelect);
+    },
+    renderItemBody: (layer: any, ai: number, card: HTMLElement) => {
+      const isAudioTemplate = layer.type && !AUDIO_BUILTIN.has(layer.type) && allTemplates[layer.type];
+      const resolvedLayer = isAudioTemplate
+        ? { ...allTemplates[layer.type], ...layer, type: allTemplates[layer.type].type }
+        : layer;
+      const layerType = resolvedLayer.type;
+      const schema = AUDIO_LAYER_SCHEMAS[layerType];
 
-        subProps.appendChild(subRow);
+      if (isAudioTemplate) {
+        const tmplInfo = document.createElement("div");
+        tmplInfo.className = "editor-template-info";
+        tmplInfo.style.margin = "2px 0";
+        tmplInfo.style.borderRadius = "3px";
+        tmplInfo.textContent = `Template: ${layer.type}`;
+        card.appendChild(tmplInfo);
       }
-      card.appendChild(subProps);
-    }
 
-    container.appendChild(card);
-  }
+      if (schema) {
+        const subProps = document.createElement("div");
+        subProps.className = "layer-subprops";
 
-  // Add audio layer button
-  const addBtn = document.createElement("button");
-  addBtn.className = "layers-add-btn";
-  addBtn.textContent = "+ Add Audio Layer";
-  addBtn.addEventListener("click", () => {
-    if (!rawSeg.audio) rawSeg.audio = [];
-    rawSeg.audio.push({ type: "tts", text: "", voice: "", volume: 1 });
-    syncYamlFromData();
-    renderEditorPanel(segIndex);
+        for (const sp of schema) {
+          const subRow = document.createElement("div");
+          subRow.className = "prop-row";
+
+          const subLabel = document.createElement("label");
+          subLabel.textContent = sp.label;
+          subRow.appendChild(subLabel);
+
+          const val = resolvedLayer[sp.key];
+          const displayVal = val != null ? val : sp.default;
+          const isInherited = isAudioTemplate && layer[sp.key] === undefined;
+          if (isInherited) subRow.classList.add("prop-inherited");
+
+          const el = renderPropertyField(sp, displayVal, (val: any) => {
+            layer[sp.key] = val;
+            syncYamlFromData();
+          });
+          subRow.appendChild(el);
+
+          if (isAudioTemplate && layer[sp.key] !== undefined) {
+            const revertBtn = document.createElement("button");
+            revertBtn.className = "prop-revert";
+            revertBtn.textContent = "\u21A9";
+            revertBtn.title = "Revert to template value";
+            revertBtn.addEventListener("click", () => {
+              delete layer[sp.key];
+              onChanged();
+            });
+            subRow.appendChild(revertBtn);
+          } else if (isInherited) {
+            const lbl = document.createElement("span");
+            lbl.className = "prop-inherit-label";
+            lbl.textContent = "template";
+            subRow.appendChild(lbl);
+          }
+
+          subProps.appendChild(subRow);
+        }
+        card.appendChild(subProps);
+      }
+    },
+    onAdd: () => {
+      if (!rawSeg.audio) rawSeg.audio = [];
+      rawSeg.audio.push({ type: "tts", text: "", voice: "", volume: 1 });
+      onChanged();
+    },
   });
-  container.appendChild(addBtn);
-
-  return container;
 }
 
 function updateSegmentProperty(index: number, key: string, value: any) {

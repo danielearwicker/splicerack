@@ -13,13 +13,13 @@ timeline:
   - type: stack
     background: "#1a1a2e"
     layers:
-      - type: heading
+      - type: "heading"
         text: "peas"
         style:
           font-size: 48
           align: "left"
         opacity: 0.5
-      - type: heading
+      - type: "heading"
         text: "chips"
         style:
           font-size: 48
@@ -109,9 +109,6 @@ timeline:
     audio:
       - type: source
         volume: 0.3
-      - type: narrator
-        text: "This diagram shows how Amanda's email communications are routed. All incoming messages are captured and logged automatically."
-        delay: 1
 
   - type: section title
     text: "Henry - selected emails"

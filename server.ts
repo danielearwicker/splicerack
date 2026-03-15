@@ -57,6 +57,13 @@ app.get("/type-registry.js", (req, res) => {
   const src = readFileSync(join(__dirname, "ui", "type-registry.ts"), "utf-8");
   res.type("application/javascript").send(stripTypes(src));
 });
+app.get("/card-list.js", (req, res) => {
+  const src = readFileSync(join(__dirname, "ui", "card-list.ts"), "utf-8");
+  const body = stripTypes(src)
+    .replace(/^export /gm, "")
+    .replace(/^import .*/gm, "");
+  res.type("application/javascript").send(body);
+});
 
 app.use(express.static(join(__dirname, "ui")));
 
