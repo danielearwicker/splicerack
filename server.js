@@ -28,6 +28,11 @@ if (!existsSync(LIBRARY_DIR)) {
   mkdirSync(LIBRARY_DIR, { recursive: true });
 }
 
+const TEMPLATES_DIR = join(PROJECT_DIR, "templates");
+if (!existsSync(TEMPLATES_DIR)) {
+  mkdirSync(TEMPLATES_DIR, { recursive: true });
+}
+
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
@@ -275,13 +280,13 @@ async function resolveAudioLayer(layer, seg, ctx) {
     return { path: audioFile, delay: layer.delay || 0, temp: true };
 
   } else if (layer.type === "tts") {
-    const { path } = await synthesize({
+    const { path, cached } = await synthesize({
       text: layer.text,
       voice: layer.voice,
       rate: layer.rate,
       pitch: layer.pitch,
     });
-    return { path, delay: layer.delay || 0, volume: layer.volume, temp: false };
+    return { path, delay: layer.delay || 0, volume: layer.volume, temp: false, ttsCached: cached };
 
   } else if (layer.type === "file") {
     const filePath = join(ctx.LIBRARY_DIR, layer.source);
@@ -399,8 +404,14 @@ const BUILTIN_TYPES = new Set(rendererRegistry.keys());
 
 // Resolve templates: if a segment's type is not a built-in, look it up in templates
 // and deep-merge the template defaults with the segment's own properties.
+function getMergedTemplates(project) {
+  const external = loadExternalTemplates();
+  const inline = project.templates || {};
+  return { ...external, ...inline }; // inline overrides external
+}
+
 function resolveTemplates(project) {
-  const templates = project.templates || {};
+  const templates = getMergedTemplates(project);
   const timeline = project.timeline || [];
 
   function resolveSeg(seg) {
@@ -573,7 +584,7 @@ app.post("/api/render/:filename", async (req, res) => {
     // --- Concatenate video (video-only, fast copy) ---
     broadcast({ type: "render-phase", phase: "Concatenating video..." });
     const concatList = join(OUTPUT_DIR, "_concat.txt");
-    const concatContent = tempFiles.map((f) => `file '${f}'`).join("\n");
+    const concatContent = tempFiles.map((f) => `file '${f.replace(/\\/g, "/")}'`).join("\n");
     writeFileSync(concatList, concatContent);
 
     const concatTmp = join(OUTPUT_DIR, "_concat_tmp.mp4");
@@ -608,7 +619,7 @@ app.post("/api/render/:filename", async (req, res) => {
 
     // Collect all audio layers with absolute positioning.
     const audioItems = []; // { path, absoluteStart, volume, loop, temp }
-    const templates = project.templates || {};
+    const templates = getMergedTemplates(project);
     const AUDIO_TYPES = new Set(["source", "tts", "file"]);
     const audioErrors = [];
 
@@ -634,8 +645,17 @@ app.post("/api/render/:filename", async (req, res) => {
         const absStart = Math.max(0, segStartTimes[i] + delay);
 
         try {
+          if (layer.type === "source") {
+            broadcast({ type: "render-phase", phase: `Extracting audio from ${seg.source || "clip"}` });
+          } else if (layer.type === "file") {
+            broadcast({ type: "render-phase", phase: `Loading audio: ${layer.source || "?"}` });
+          }
           const resolved = await resolveAudioLayer(layer, seg, ctx);
           if (resolved) {
+            if (layer.type === "tts") {
+              const tag = resolved.ttsCached ? "[cached]" : "[generated]";
+              broadcast({ type: "render-phase", phase: `TTS ${tag}: "${(layer.text || "").substring(0, 60)}" (${layer.voice || "?"})` });
+            }
             audioItems.push({
               path: resolved.path,
               absoluteStart: absStart,
@@ -784,6 +804,84 @@ app.delete("/api/cache", (req, res) => {
     const files = readdirSync(CACHE_DIR).filter(f => f.endsWith(".mp4"));
     for (const f of files) unlinkSync(join(CACHE_DIR, f));
     res.json({ ok: true, cleared: files.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Templates API ---
+
+// Load all external templates from the templates directory
+function loadExternalTemplates() {
+  const templates = {};
+  try {
+    const files = readdirSync(TEMPLATES_DIR).filter(f => f.endsWith(".yaml") || f.endsWith(".yml"));
+    for (const f of files) {
+      try {
+        const raw = readFileSync(join(TEMPLATES_DIR, f), "utf-8");
+        const parsed = yaml.load(raw);
+        const name = f.replace(/\.ya?ml$/, "");
+        if (parsed && typeof parsed === "object") {
+          templates[name] = parsed;
+        }
+      } catch {}
+    }
+  } catch {}
+  return templates;
+}
+
+app.get("/api/templates", (req, res) => {
+  try {
+    const templates = loadExternalTemplates();
+    const list = Object.entries(templates).map(([name, parsed]) => ({
+      name,
+      type: parsed.type || "unknown",
+      parsed,
+      modified: statSync(join(TEMPLATES_DIR, `${name}.yaml`)).mtime,
+    }));
+    res.json({ templates: list });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/template/:name", (req, res) => {
+  const name = decodeURIComponent(req.params.name);
+  const filePath = join(TEMPLATES_DIR, `${name}.yaml`);
+  if (!existsSync(filePath)) return res.status(404).json({ error: "Template not found" });
+  try {
+    const raw = readFileSync(filePath, "utf-8");
+    const parsed = yaml.load(raw);
+    res.json({ name, raw, parsed });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/template/:name", (req, res) => {
+  const name = decodeURIComponent(req.params.name);
+  if (name.includes("..") || name.includes("/") || name.includes("\\")) {
+    return res.status(400).json({ error: "Invalid template name" });
+  }
+  const filePath = join(TEMPLATES_DIR, `${name}.yaml`);
+  try {
+    const content = req.body.raw || yaml.dump(req.body.parsed, { lineWidth: -1 });
+    writeFileSync(filePath, content);
+    broadcast({ type: "templates-updated" });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/template/:name", (req, res) => {
+  const name = decodeURIComponent(req.params.name);
+  const filePath = join(TEMPLATES_DIR, `${name}.yaml`);
+  if (!existsSync(filePath)) return res.status(404).json({ error: "Template not found" });
+  try {
+    unlinkSync(filePath);
+    broadcast({ type: "templates-updated" });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

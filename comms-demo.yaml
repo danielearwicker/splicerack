@@ -4,42 +4,6 @@ output:
   fps: 30
   background: "#1a1a2e"
 
-templates:
-  narrator:
-    type: tts
-    voice: en-GB-RyanNeural
-    volume: 0.9
-
-  heading:
-    type: "caption"
-    duration: 3
-    style:
-      font-size: 64
-      color: "#ffffff"
-      background: "#1a1a2e"
-      align: "center"
-      valign: "middle"
-    fade-in: 0.5
-    fade-out: 0.5
-
-  section title:
-    type: "caption"
-    duration: 3
-    style:
-      font-size: 42
-      color: "#8ab4f8"
-      background: "#1a1a2e"
-      align: "center"
-      valign: "middle"
-    fade-in: 0.3
-    fade-out: 1
-
-  comms clip:
-    type: "clip"
-    source: "Communication with Suppliers.mp4"
-    fade-in: 0.3
-    fade-out: 0.3
-
 timeline:
   - type: heading
     text: "Comms Explainer Demo Thingy"
@@ -66,66 +30,55 @@ timeline:
   - type: comms clip
     clip: "flow"
     keyframes:
-      # Start wide — show full diagram (content is slightly right of center)
       - time: 0
         scale: 1
         x: 0.55
         y: 0.5
-      # Zoom into heart near User node
       - time: 8
         scale: 2.2
         x: 0.62
         y: 0.48
         ease: ease-in-out
-      # Pan up — follow heart toward Supplier
       - time: 11
         scale: 2.2
         x: 0.63
         y: 0.28
         ease: ease-in-out
-      # Pan down — heart drops toward Emails to FISCAL path
       - time: 15
         scale: 2
         x: 0.55
         y: 0.58
         ease: ease-in-out
-      # Follow heart to FISCAL database
       - time: 19
         scale: 2
         x: 0.55
         y: 0.78
         ease: ease-in-out
-      # Hold on FISCAL area — thumbs up appears
       - time: 27
         scale: 1.8
         x: 0.52
         y: 0.78
         ease: ease-in-out
-      # Bell appears near FISCAL — zoom out to see full path
       - time: 31
         scale: 1.6
         x: 0.58
         y: 0.72
         ease: ease-in-out
-      # Pan up-right — follow bell along "Compare & find anomalies"
       - time: 36
         scale: 1.8
         x: 0.65
         y: 0.62
         ease: ease-in-out
-      # Follow bell to User node
       - time: 40
         scale: 2
         x: 0.62
         y: 0.48
         ease: ease-in-out
-      # Second heart appears near User — keep it framed
       - time: 43
         scale: 2
         x: 0.62
         y: 0.42
         ease: ease-in-out
-      # Zoom back out to full view
       - time: 46
         scale: 1
         x: 0.55

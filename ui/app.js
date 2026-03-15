@@ -9,6 +9,9 @@ let clips = [];
 let currentProject = null;
 let projectData = null;
 let currentOutput = null;
+let externalTemplatesCache = {};
+let currentTemplateName = null;
+let currentTemplateData = null;
 
 // Elements
 const dropZone = $("#drop-zone");
@@ -72,6 +75,7 @@ function formatTime(seconds) {
 const TAB_ROUTES = {
   "library-tab": "/library",
   "timeline-tab": "/timeline",
+  "templates-tab": "/templates",
   "outputs-tab": "/outputs",
   "logs-tab": "/logs",
 };
@@ -81,6 +85,7 @@ function switchTab(tabId, { pushState = true } = {}) {
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tabId));
   $$(".tab-content").forEach((c) => c.classList.toggle("active", c.id === tabId));
   if (tabId === "timeline-tab") loadProjects();
+  if (tabId === "templates-tab") loadTemplatesList();
   if (tabId === "outputs-tab") loadOutputs();
 
   if (pushState) {
@@ -88,6 +93,8 @@ function switchTab(tabId, { pushState = true } = {}) {
     let fullPath = basePath;
     if (tabId === "timeline-tab" && currentProject) {
       fullPath = `${basePath}/${encodeURIComponent(currentProject)}`;
+    } else if (tabId === "templates-tab" && currentTemplateName) {
+      fullPath = `${basePath}/${encodeURIComponent(currentTemplateName)}`;
     } else if (tabId === "outputs-tab" && currentOutput) {
       fullPath = `${basePath}/${encodeURIComponent(currentOutput)}`;
     }
@@ -102,6 +109,8 @@ function updateRoute() {
   let fullPath = basePath;
   if (getActiveTab() === "timeline-tab" && currentProject) {
     fullPath = `${basePath}/${encodeURIComponent(currentProject)}`;
+  } else if (getActiveTab() === "templates-tab" && currentTemplateName) {
+    fullPath = `${basePath}/${encodeURIComponent(currentTemplateName)}`;
   } else if (getActiveTab() === "outputs-tab" && currentOutput) {
     fullPath = `${basePath}/${encodeURIComponent(currentOutput)}`;
   }
@@ -137,6 +146,8 @@ function navigateFromUrl() {
       projectSelect.value = param;
       loadProject(param);
     });
+  } else if (tabId === "templates-tab" && param) {
+    loadTemplatesList().then(() => selectTemplate(param));
   } else if (tabId === "outputs-tab" && param) {
     loadOutputs().then(() => selectOutput(param));
   }
@@ -612,14 +623,80 @@ function closeEditor() {
   $$(".timeline-segment.selected").forEach((s) => s.classList.remove("selected"));
 }
 
+// Segment toolbar actions
+$("#btn-seg-up").addEventListener("click", () => {
+  if (selectedSegmentIndex == null || selectedSegmentIndex <= 0) return;
+  moveSegment(selectedSegmentIndex, selectedSegmentIndex - 1);
+  selectedSegmentIndex--;
+  renderEditorPanel(selectedSegmentIndex);
+});
+
+$("#btn-seg-down").addEventListener("click", () => {
+  if (selectedSegmentIndex == null || !projectData) return;
+  if (selectedSegmentIndex >= projectData.timeline.length - 1) return;
+  moveSegment(selectedSegmentIndex, selectedSegmentIndex + 1);
+  selectedSegmentIndex++;
+  renderEditorPanel(selectedSegmentIndex);
+});
+
+$("#btn-seg-stack").addEventListener("click", () => {
+  if (selectedSegmentIndex == null || !projectData) return;
+  const seg = projectData.timeline[selectedSegmentIndex];
+  if (seg.type === "stack") return; // already a stack
+  const layer = { ...seg, opacity: 1, delay: 0 };
+  const stack = {
+    type: "stack",
+    background: (projectData.output && projectData.output.background) || "#1a1a2e",
+    layers: [layer],
+  };
+  projectData.timeline[selectedSegmentIndex] = stack;
+  syncYamlFromData();
+  renderEditorPanel(selectedSegmentIndex);
+});
+
+$("#btn-seg-unstack").addEventListener("click", () => {
+  if (selectedSegmentIndex == null || !projectData) return;
+  const seg = projectData.timeline[selectedSegmentIndex];
+  const layers = seg.layers || [];
+  if (layers.length === 0) return;
+
+  if (layers.length === 1) {
+    // Single layer — replace stack with the layer
+    const layerSeg = { ...layers[0] };
+    delete layerSeg.opacity;
+    delete layerSeg.delay;
+    projectData.timeline[selectedSegmentIndex] = layerSeg;
+  } else {
+    // Multiple layers — replace stack with all layers as separate segments
+    const newSegs = layers.map((l) => {
+      const s = { ...l };
+      delete s.opacity;
+      delete s.delay;
+      return s;
+    });
+    projectData.timeline.splice(selectedSegmentIndex, 1, ...newSegs);
+  }
+  syncYamlFromData();
+  renderEditorPanel(selectedSegmentIndex);
+});
+
+$("#btn-seg-delete").addEventListener("click", () => {
+  if (selectedSegmentIndex == null || !projectData) return;
+  const seg = projectData.timeline[selectedSegmentIndex];
+  if (!confirm(`Delete segment ${selectedSegmentIndex + 1} (${seg.type})?`)) return;
+  projectData.timeline.splice(selectedSegmentIndex, 1);
+  syncYamlFromData();
+  closeEditor();
+});
+
 editorTypeSelect.addEventListener("change", () => {
   if (selectedSegmentIndex == null || !projectData) return;
   const newType = editorTypeSelect.value;
   const seg = projectData.timeline[selectedSegmentIndex];
-  const oldResolvedType = isKnownType(seg.type) ? seg.type : ((projectData.templates || {})[seg.type] || {}).type || seg.type;
+  const oldResolvedType = isKnownType(seg.type) ? seg.type : (getMergedTemplates()[seg.type] || {}).type || seg.type;
 
   // Build a fresh segment with defaults for the new resolved type
-  const resolvedType = isKnownType(newType) ? newType : ((projectData.templates || {})[newType] || {}).type || newType;
+  const resolvedType = isKnownType(newType) ? newType : (getMergedTemplates()[newType] || {}).type || newType;
   const schema = (SpliceRack.types[resolvedType] || {}).schema;
 
   if (isKnownType(newType)) {
@@ -663,8 +740,32 @@ async function renderEditorPanel(index) {
   selectedSegmentIndex = index;
   segmentEditor.style.display = "";
 
+  // Update toolbar button states
+  $("#btn-seg-up").disabled = index <= 0;
+  $("#btn-seg-down").disabled = index >= projectData.timeline.length - 1;
+  const segTypeForToolbar = isKnownType(projectData.timeline[index].type)
+    ? projectData.timeline[index].type
+    : (getMergedTemplates()[projectData.timeline[index].type] || {}).type || projectData.timeline[index].type;
+  $("#btn-seg-stack").style.display = segTypeForToolbar === "stack" ? "none" : "";
+  // Show Unstack button only for stacks with layers
+  const unstackBtn = $("#btn-seg-unstack");
+  if (segTypeForToolbar === "stack") {
+    const layers = projectData.timeline[index].layers || [];
+    if (layers.length > 0) {
+      unstackBtn.style.display = "";
+      unstackBtn.textContent = layers.length === 1 ? "Unstack" : "Unstack All";
+      unstackBtn.title = layers.length === 1
+        ? "Replace stack with its single layer"
+        : "Replace stack with all layers as separate segments";
+    } else {
+      unstackBtn.style.display = "none";
+    }
+  } else {
+    unstackBtn.style.display = "none";
+  }
+
   const rawSeg = projectData.timeline[index];
-  const templates = projectData.templates || {};
+  const templates = getMergedTemplates();
   const isTemplate = !isKnownType(rawSeg.type);
   const resolvedSeg = resolveTemplate(rawSeg, templates);
   const resolvedType = resolvedSeg.type;
@@ -893,18 +994,43 @@ async function renderEditorPanel(index) {
         header.appendChild(num);
 
         const typeSelect = document.createElement("select");
+        // Built-in types
+        const builtinGroup = document.createElement("optgroup");
+        builtinGroup.label = "Built-in";
         for (const t of Object.keys(SpliceRack.types)) {
           if (t === "stack") continue; // prevent recursive stacks
           const opt = document.createElement("option");
           opt.value = t;
           opt.textContent = t;
           if (layer.type === t) opt.selected = true;
-          typeSelect.appendChild(opt);
+          builtinGroup.appendChild(opt);
+        }
+        typeSelect.appendChild(builtinGroup);
+        // Templates (segment types only, excluding stack)
+        const layerTemplates = Object.entries(getMergedTemplates())
+          .filter(([, v]) => v.type && SpliceRack.types[v.type] && v.type !== "stack");
+        if (layerTemplates.length > 0) {
+          const tmplGroup = document.createElement("optgroup");
+          tmplGroup.label = "Templates";
+          for (const [name, tmpl] of layerTemplates) {
+            const opt = document.createElement("option");
+            opt.value = name;
+            opt.textContent = `${name} (${tmpl.type})`;
+            if (layer.type === name) opt.selected = true;
+            tmplGroup.appendChild(opt);
+          }
+          typeSelect.appendChild(tmplGroup);
         }
         typeSelect.addEventListener("change", () => {
-          const newTypeDef = SpliceRack.types[typeSelect.value];
-          if (!newTypeDef) return;
-          const newLayer = newTypeDef.defaults();
+          const val = typeSelect.value;
+          const typeDef = SpliceRack.types[val];
+          let newLayer;
+          if (typeDef) {
+            newLayer = typeDef.defaults();
+          } else {
+            // Template — just set the type name
+            newLayer = { type: val };
+          }
           newLayer.opacity = layer.opacity != null ? layer.opacity : 1;
           newLayer.delay = layer.delay || 0;
           layersValue[li] = newLayer;
@@ -935,6 +1061,19 @@ async function renderEditorPanel(index) {
           });
           actions.appendChild(downBtn);
         }
+        const unstackBtn = document.createElement("button");
+        unstackBtn.textContent = "Unstack";
+        unstackBtn.title = "Replace the stack with this layer";
+        unstackBtn.addEventListener("click", () => {
+          const layerSeg = { ...layersValue[li] };
+          delete layerSeg.opacity;
+          delete layerSeg.delay;
+          projectData.timeline[index] = layerSeg;
+          syncYamlFromData();
+          renderEditorPanel(index);
+        });
+        actions.appendChild(unstackBtn);
+
         const delBtn = document.createElement("button");
         delBtn.className = "layer-delete";
         delBtn.textContent = "\u00D7";
@@ -982,14 +1121,19 @@ async function renderEditorPanel(index) {
 
         card.appendChild(stackProps);
 
-        // Sub-properties from the layer's type schema
-        const layerTypeDef = SpliceRack.types[layer.type];
+        // Sub-properties from the layer's type schema (resolve templates)
+        const layerIsTemplate = !SpliceRack.types[layer.type] && getMergedTemplates()[layer.type];
+        const resolvedLayer = layerIsTemplate
+          ? resolveTemplate(layer, getMergedTemplates())
+          : layer;
+        const resolvedLayerType = resolvedLayer.type;
+        const layerTypeDef = SpliceRack.types[resolvedLayerType];
         if (layerTypeDef && layerTypeDef.schema) {
           const subProps = document.createElement("div");
           subProps.className = "layer-subprops";
 
           for (const sp of layerTypeDef.schema) {
-            if (sp.condition && !sp.condition(layer)) continue;
+            if (sp.condition && !sp.condition(resolvedLayer)) continue;
             const subRow = document.createElement("div");
             subRow.className = "prop-row";
 
@@ -997,7 +1141,7 @@ async function renderEditorPanel(index) {
             subLabel.textContent = sp.label;
             subRow.appendChild(subLabel);
 
-            const val = getNestedValue(layer, sp.key);
+            const val = getNestedValue(resolvedLayer, sp.key);
             const displayVal = val != null ? val : sp.default;
 
             if (sp.type === "string") {
@@ -1392,7 +1536,7 @@ function buildAudioLayersEditor(segIndex, rawSeg) {
     // Only show "source" for clip segments
     const segType = rawSeg.type;
     const resolvedSegType = isKnownType(segType) ? segType :
-      ((projectData.templates || {})[segType] || {}).type || segType;
+      (getMergedTemplates()[segType] || {}).type || segType;
 
     for (const t of audioTypes) {
       if (t === "source" && resolvedSegType !== "clip") continue;
@@ -1636,7 +1780,7 @@ async function renderTimeline() {
     return;
   }
 
-  const templates = projectData.templates || {};
+  const templates = getMergedTemplates();
 
   // Resolve templates for display
   const resolved = projectData.timeline.map((seg) => resolveTemplate(seg, templates));
@@ -1700,43 +1844,9 @@ async function renderTimeline() {
     info.appendChild(title);
     info.appendChild(detail);
 
-    // Actions
-    const actions = document.createElement("div");
-    actions.className = "seg-actions";
-
-    const moveUpBtn = document.createElement("button");
-    moveUpBtn.textContent = "Up";
-    moveUpBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      moveSegment(index, index - 1);
-    });
-
-    const moveDownBtn = document.createElement("button");
-    moveDownBtn.textContent = "Down";
-    moveDownBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      moveSegment(index, index + 1);
-    });
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "seg-delete";
-    deleteBtn.textContent = "Del";
-    deleteBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (confirm(`Delete segment ${index + 1} (${seg.type})?`)) {
-        projectData.timeline.splice(index, 1);
-        syncYamlFromData();
-      }
-    });
-
-    if (index > 0) actions.appendChild(moveUpBtn);
-    if (index < projectData.timeline.length - 1) actions.appendChild(moveDownBtn);
-    actions.appendChild(deleteBtn);
-
     div.appendChild(badge);
     if (thumbnail) div.appendChild(thumbnail);
     div.appendChild(info);
-    div.appendChild(actions);
 
     // Click to select and open editor
     div.addEventListener("click", () => {
@@ -1783,8 +1893,9 @@ async function renderTimeline() {
 
 function selectYamlSegment(index) {
   const text = yamlEditor.value;
-  // Find all "  - type:" occurrences which mark segment starts
-  const pattern = /^[ \t]*- type:/gm;
+  // Find top-level timeline segment starts: exactly "  - type:" (2-space indent)
+  // Not deeper-nested ones inside layers/audio arrays
+  const pattern = /^  - type:/gm;
   const starts = [];
   let match;
   while ((match = pattern.exec(text)) !== null) {
@@ -1891,8 +2002,9 @@ function syncYamlFromData() {
 
     if (isTemplate) {
       // For template segments, only serialize overridden properties
+      // (audio and keyframes are handled universally below)
       for (const [k, v] of Object.entries(seg)) {
-        if (k === "type") continue;
+        if (k === "type" || k === "audio" || k === "keyframes") continue;
         if (v === undefined) continue;
         const rendered = yamlValue(v, "    ");
         if (rendered.startsWith("\n")) {
@@ -1950,22 +2062,47 @@ function syncYamlFromData() {
 // --- Add segment ---
 // Populate the add-segment type dropdown from the registry
 const addSegmentType = $("#add-segment-type");
-for (const t of Object.keys(SpliceRack.types)) {
-  const opt = document.createElement("option");
-  opt.value = t;
-  opt.textContent = t;
-  addSegmentType.appendChild(opt);
+
+function refreshAddSegmentDropdown() {
+  addSegmentType.innerHTML = "";
+  // Built-in types
+  const builtinGroup = document.createElement("optgroup");
+  builtinGroup.label = "Built-in";
+  for (const t of Object.keys(SpliceRack.types)) {
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.textContent = t;
+    builtinGroup.appendChild(opt);
+  }
+  addSegmentType.appendChild(builtinGroup);
+  // Templates (segment types only — those with a type that maps to a built-in)
+  const merged = getMergedTemplates();
+  const segTemplates = Object.entries(merged).filter(([, v]) => SpliceRack.types[v.type]);
+  if (segTemplates.length > 0) {
+    const tmplGroup = document.createElement("optgroup");
+    tmplGroup.label = "Templates";
+    for (const [name, tmpl] of segTemplates) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = `${name} (${tmpl.type})`;
+      tmplGroup.appendChild(opt);
+    }
+    addSegmentType.appendChild(tmplGroup);
+  }
 }
+refreshAddSegmentDropdown();
 
 $("#btn-add-segment").addEventListener("click", () => {
   if (!projectData) return alert("Open or create a project first");
   const typeName = addSegmentType.value;
   const typeDef = SpliceRack.types[typeName];
-  if (!typeDef) return;
-  const newSeg = typeDef.defaults();
-  projectData.timeline.push(newSeg);
+  if (typeDef) {
+    projectData.timeline.push(typeDef.defaults());
+  } else {
+    // Template — create a segment referencing it by name
+    projectData.timeline.push({ type: typeName });
+  }
   syncYamlFromData();
-  // Open editor for the new segment
   const newIndex = projectData.timeline.length - 1;
   renderEditorPanel(newIndex);
 });
@@ -2111,6 +2248,12 @@ function connectWS() {
       }
     } else if (msg.type === "outputs-updated") {
       loadOutputs();
+    } else if (msg.type === "templates-updated") {
+      loadExternalTemplates().then(() => {
+        refreshAddSegmentDropdown();
+        if (getActiveTab() === "templates-tab") loadTemplatesList();
+        if (projectData) renderTimeline();
+      });
     } else if (msg.type === "render-phase") {
       logsProgressText.textContent = msg.phase;
       renderStatusText.textContent = msg.phase;
@@ -2139,7 +2282,341 @@ yamlEditor.addEventListener("keydown", (e) => {
   }
 });
 
+// --- External Templates ---
+// (state variables moved to top of file)
+
+async function loadExternalTemplates() {
+  try {
+    const res = await fetch("/api/templates");
+    const data = await res.json();
+    externalTemplatesCache = {};
+    for (const t of data.templates || []) {
+      externalTemplatesCache[t.name] = t.parsed;
+    }
+  } catch {
+    externalTemplatesCache = {};
+  }
+  return externalTemplatesCache;
+}
+
+function getMergedTemplates() {
+  const inline = (projectData && projectData.templates) || {};
+  return { ...externalTemplatesCache, ...inline };
+}
+
+const templatesList = $("#templates-list");
+const templateEditorTitle = $("#template-editor-title");
+const templateEditorFields = $("#template-editor-fields");
+const templateTypeSelect = $("#template-type-select");
+const templateTypeRow = $(".template-type-row");
+
+const templatesFilter = $("#templates-filter");
+templatesFilter.addEventListener("input", () => renderFilteredTemplatesList());
+
+async function loadTemplatesList() {
+  await loadExternalTemplates();
+  renderFilteredTemplatesList();
+}
+
+function renderFilteredTemplatesList() {
+  const filter = (templatesFilter.value || "").toLowerCase();
+  templatesList.innerHTML = "";
+
+  const AUDIO_TYPES = new Set(["tts", "file", "source"]);
+  const entries = Object.entries(externalTemplatesCache)
+    .filter(([name]) => !filter || name.toLowerCase().includes(filter))
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  // Split into video and audio
+  const videoTemplates = entries.filter(([, t]) => !AUDIO_TYPES.has(t.type));
+  const audioTemplates = entries.filter(([, t]) => AUDIO_TYPES.has(t.type));
+
+  function renderGroup(label, items) {
+    if (items.length === 0) return;
+    // Group by base type
+    const byType = {};
+    for (const [name, tmpl] of items) {
+      const t = tmpl.type || "unknown";
+      if (!byType[t]) byType[t] = [];
+      byType[t].push([name, tmpl]);
+    }
+
+    const groupHeader = document.createElement("li");
+    groupHeader.className = "templates-group-header";
+    groupHeader.textContent = label;
+    templatesList.appendChild(groupHeader);
+
+    for (const [type, group] of Object.entries(byType).sort(([a], [b]) => a.localeCompare(b))) {
+      const subHeader = document.createElement("li");
+      subHeader.className = "templates-group-header seg-type-${type}";
+      subHeader.classList.add(`seg-type-${type}`);
+      subHeader.textContent = type;
+      templatesList.appendChild(subHeader);
+
+      for (const [name] of group) {
+        const li = document.createElement("li");
+        li.className = currentTemplateName === name ? "active" : "";
+        li.textContent = name;
+        li.addEventListener("click", () => selectTemplate(name));
+        templatesList.appendChild(li);
+      }
+    }
+  }
+
+  renderGroup("Video", videoTemplates);
+  renderGroup("Audio", audioTemplates);
+}
+
+async function selectTemplate(name) {
+  try {
+    const res = await fetch(`/api/template/${encodeURIComponent(name)}`);
+    const data = await res.json();
+    currentTemplateName = name;
+    currentTemplateData = data.parsed;
+    updateRoute();
+    renderTemplateEditor();
+    // Highlight in list
+    for (const li of templatesList.children) {
+      li.classList.toggle("active", li.textContent.trim().endsWith(name));
+    }
+  } catch (err) {
+    console.error("Failed to load template:", err);
+  }
+}
+
+function renderTemplateEditor() {
+  if (!currentTemplateData || !currentTemplateName) {
+    templateEditorTitle.textContent = "Select a template";
+    templateEditorFields.innerHTML = "";
+    templateTypeRow.style.display = "none";
+    $("#btn-delete-template").style.display = "none";
+    return;
+  }
+
+  templateEditorTitle.textContent = currentTemplateName;
+  templateTypeRow.style.display = "";
+  $("#btn-delete-template").style.display = "";
+
+  // Populate type dropdown
+  templateTypeSelect.innerHTML = "";
+  for (const t of Object.keys(SpliceRack.types)) {
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.textContent = t;
+    if (currentTemplateData.type === t) opt.selected = true;
+    templateTypeSelect.appendChild(opt);
+  }
+  // Include audio types
+  for (const t of ["tts", "file", "source"]) {
+    if (!SpliceRack.types[t]) {
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = `${t} (audio)`;
+      if (currentTemplateData.type === t) opt.selected = true;
+      templateTypeSelect.appendChild(opt);
+    }
+  }
+
+  renderTemplateFields();
+}
+
+function renderTemplateFields() {
+  templateEditorFields.innerHTML = "";
+  const tmpl = currentTemplateData;
+  const typeName = tmpl.type;
+  const typeDef = SpliceRack.types[typeName];
+  const AUDIO_SCHEMAS = {
+    tts: [
+      { key: "voice", label: "Voice", type: "voice-dropdown", default: "" },
+      { key: "volume", label: "Volume", type: "number", default: 1, min: 0, max: 2, step: 0.1 },
+      { key: "delay", label: "Delay (s)", type: "number", default: 0, step: 0.1 },
+    ],
+    file: [
+      { key: "source", label: "File", type: "audio-file", default: "" },
+      { key: "volume", label: "Volume", type: "number", default: 1, min: 0, max: 2, step: 0.1 },
+      { key: "delay", label: "Delay (s)", type: "number", default: 0, step: 0.1 },
+      { key: "loop", label: "Loop", type: "dropdown", default: "false", options: ["false", "true"] },
+    ],
+    source: [
+      { key: "volume", label: "Volume", type: "number", default: 1, min: 0, max: 2, step: 0.1 },
+    ],
+  };
+
+  const schema = typeDef ? typeDef.schema : AUDIO_SCHEMAS[typeName];
+  if (!schema) {
+    templateEditorFields.innerHTML = '<div style="padding:12px;color:#808090;font-size:12px">Unknown type</div>';
+    return;
+  }
+
+  for (const prop of schema) {
+    if (prop.condition && !prop.condition(tmpl)) continue;
+
+    const row = document.createElement("div");
+    row.className = "prop-row";
+
+    const label = document.createElement("label");
+    label.textContent = prop.label;
+    row.appendChild(label);
+
+    const val = getNestedValue(tmpl, prop.key);
+    const displayVal = val != null ? val : prop.default;
+
+    if (prop.type === "string") {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = displayVal != null ? String(displayVal) : "";
+      input.addEventListener("change", () => {
+        setNestedValue(tmpl, prop.key, input.value);
+        autoSaveTemplate();
+      });
+      row.appendChild(input);
+    } else if (prop.type === "number") {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.value = displayVal != null ? displayVal : "";
+      if (prop.min != null) input.min = prop.min;
+      if (prop.max != null) input.max = prop.max;
+      if (prop.step != null) input.step = prop.step;
+      input.addEventListener("change", () => {
+        setNestedValue(tmpl, prop.key, parseFloat(input.value));
+        autoSaveTemplate();
+      });
+      row.appendChild(input);
+    } else if (prop.type === "color") {
+      const pair = document.createElement("div");
+      pair.className = "prop-color-pair";
+      const cInput = document.createElement("input");
+      cInput.type = "color";
+      cInput.value = displayVal || "#000000";
+      const tInput = document.createElement("input");
+      tInput.type = "text";
+      tInput.value = displayVal || "";
+      cInput.addEventListener("input", () => {
+        tInput.value = cInput.value;
+        setNestedValue(tmpl, prop.key, cInput.value);
+        autoSaveTemplate();
+      });
+      tInput.addEventListener("change", () => {
+        cInput.value = tInput.value;
+        setNestedValue(tmpl, prop.key, tInput.value);
+        autoSaveTemplate();
+      });
+      pair.appendChild(cInput);
+      pair.appendChild(tInput);
+      row.appendChild(pair);
+    } else if (prop.type === "dropdown") {
+      const sel = document.createElement("select");
+      for (const o of prop.options) {
+        const opt = document.createElement("option");
+        opt.value = o;
+        opt.textContent = o;
+        if (String(displayVal) === o) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      sel.addEventListener("change", () => {
+        const v = sel.value === "true" ? true : sel.value === "false" ? false : sel.value;
+        setNestedValue(tmpl, prop.key, v);
+        autoSaveTemplate();
+      });
+      row.appendChild(sel);
+    } else if (prop.type === "voice-dropdown") {
+      const sel = document.createElement("select");
+      const loading = document.createElement("option");
+      loading.value = displayVal || "";
+      loading.textContent = displayVal || "Loading...";
+      sel.appendChild(loading);
+      getVoicesList().then((voices) => {
+        sel.innerHTML = "";
+        const empty = document.createElement("option");
+        empty.value = "";
+        empty.textContent = "-- select voice --";
+        sel.appendChild(empty);
+        for (const v of voices) {
+          const opt = document.createElement("option");
+          opt.value = v.name;
+          opt.textContent = `${v.name} (${v.gender}, ${v.localeName})`;
+          if (displayVal === v.name) opt.selected = true;
+          sel.appendChild(opt);
+        }
+      });
+      sel.addEventListener("change", () => {
+        setNestedValue(tmpl, prop.key, sel.value);
+        autoSaveTemplate();
+      });
+      row.appendChild(sel);
+    }
+
+    templateEditorFields.appendChild(row);
+  }
+}
+
+let templateSaveTimer = null;
+function autoSaveTemplate() {
+  clearTimeout(templateSaveTimer);
+  templateSaveTimer = setTimeout(async () => {
+    if (!currentTemplateName || !currentTemplateData) return;
+    try {
+      await fetch(`/api/template/${encodeURIComponent(currentTemplateName)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parsed: currentTemplateData }),
+      });
+    } catch (err) {
+      console.error("Failed to save template:", err);
+    }
+  }, 500);
+}
+
+templateTypeSelect.addEventListener("change", () => {
+  if (!currentTemplateData) return;
+  currentTemplateData.type = templateTypeSelect.value;
+  // Reset properties for new type, keeping the type
+  const newData = { type: templateTypeSelect.value };
+  const typeDef = SpliceRack.types[templateTypeSelect.value];
+  if (typeDef) {
+    const defaults = typeDef.defaults();
+    delete defaults.type; // keep our type name
+    Object.assign(newData, defaults);
+  }
+  currentTemplateData = newData;
+  autoSaveTemplate();
+  renderTemplateFields();
+});
+
+$("#btn-new-template").addEventListener("click", async () => {
+  const name = prompt("Template name:");
+  if (!name) return;
+  try {
+    await fetch(`/api/template/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parsed: { type: "caption", duration: 3 } }),
+    });
+    await loadTemplatesList();
+    selectTemplate(name);
+  } catch (err) {
+    console.error("Failed to create template:", err);
+  }
+});
+
+$("#btn-delete-template").addEventListener("click", async () => {
+  if (!currentTemplateName) return;
+  if (!confirm(`Delete template "${currentTemplateName}"?`)) return;
+  try {
+    await fetch(`/api/template/${encodeURIComponent(currentTemplateName)}`, { method: "DELETE" });
+    currentTemplateName = null;
+    currentTemplateData = null;
+    renderTemplateEditor();
+    await loadTemplatesList();
+  } catch (err) {
+    console.error("Failed to delete template:", err);
+  }
+});
+
 // --- Init ---
 loadLibrary();
 connectWS();
-navigateFromUrl();
+loadExternalTemplates().then(() => {
+  refreshAddSegmentDropdown();
+  navigateFromUrl();
+});

@@ -17,6 +17,7 @@
     <div class="tab-bar">
       <button class="tab active" data-tab="library-tab">Library</button>
       <button class="tab" data-tab="timeline-tab">Timeline</button>
+      <button class="tab" data-tab="templates-tab">Templates</button>
       <button class="tab" data-tab="outputs-tab">Outputs</button>
       <button class="tab" data-tab="logs-tab">Logs</button>
     </div>
@@ -109,12 +110,22 @@
                 <h3>Segment Properties</h3>
                 <button id="btn-close-editor" class="editor-close">&times;</button>
               </div>
-              <div class="segment-editor-type-row">
-                <label>Type</label>
-                <select id="editor-type-select"></select>
+              <div class="segment-editor-scroll">
+                <div class="segment-editor-type-row">
+                  <label>Type</label>
+                  <select id="editor-type-select"></select>
+                </div>
+                <div id="editor-template-info" class="editor-template-info" style="display:none"></div>
+                <div id="editor-fields" class="editor-fields"></div>
               </div>
-              <div id="editor-template-info" class="editor-template-info" style="display:none"></div>
-              <div id="editor-fields" class="editor-fields"></div>
+              <div id="segment-toolbar" class="segment-toolbar">
+                <button id="btn-seg-up" title="Move up">Up</button>
+                <button id="btn-seg-down" title="Move down">Down</button>
+                <button id="btn-seg-stack" title="Wrap in a stack">Stack</button>
+                <button id="btn-seg-unstack" title="Unstack" style="display:none">Unstack</button>
+                <div style="flex:1"></div>
+                <button id="btn-seg-delete" class="seg-delete" title="Delete segment">Delete</button>
+              </div>
             </div>
           </div>
 
@@ -125,6 +136,32 @@
             </div>
             <span id="render-status-text">Rendering...</span>
           </div>
+        </div>
+      </div>
+    </div>
+    <!-- Templates tab -->
+    <div id="templates-tab" class="tab-content">
+      <div class="templates-layout">
+        <div class="panel templates-list-panel">
+          <div class="panel-header">
+            <h2>Templates</h2>
+            <button id="btn-new-template" class="toolbar-btn">+ New</button>
+          </div>
+          <input type="text" id="templates-filter" class="templates-filter" placeholder="Filter templates...">
+          <ul id="templates-list" class="library-list"></ul>
+        </div>
+        <div class="panel templates-editor-panel">
+          <div class="panel-header">
+            <h2 id="template-editor-title">Select a template</h2>
+            <div class="template-editor-actions" style="display:flex;gap:4px">
+              <button id="btn-delete-template" class="delete-output-btn" style="display:none">Delete</button>
+            </div>
+          </div>
+          <div class="template-type-row segment-editor-type-row" style="display:none">
+            <label>Type</label>
+            <select id="template-type-select"></select>
+          </div>
+          <div id="template-editor-fields" class="editor-fields"></div>
         </div>
       </div>
     </div>

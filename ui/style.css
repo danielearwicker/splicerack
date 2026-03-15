@@ -105,7 +105,7 @@ header h1 {
   text-overflow: ellipsis;
 }
 
-.library-list li:hover {
+.library-list li:hover:not(.templates-group-header) {
   background: #16213e;
 }
 
@@ -575,8 +575,47 @@ header h1 {
   border-left: 1px solid #0f3460;
   background: #1a1a2e;
   width: 50%;
-  overflow-y: auto;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.segment-editor-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.segment-toolbar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid #0f3460;
+  background: #111128;
+  flex-shrink: 0;
+}
+
+.segment-toolbar button {
+  background: #0f3460;
+  color: #e0e0e0;
+  border: 1px solid #1a5276;
+  padding: 3px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.segment-toolbar button:hover {
+  background: #1a5276;
+}
+
+.segment-toolbar .seg-delete {
+  background: #5c1a2a;
+  border-color: #8a2040;
+}
+
+.segment-toolbar .seg-delete:hover {
+  background: #e94560;
+  border-color: #e94560;
 }
 
 .segment-editor-header {
@@ -802,6 +841,93 @@ header h1 {
 
 .delete-output-btn:hover {
   background: #c73850;
+}
+
+/* Templates tab */
+.templates-layout {
+  display: flex;
+  height: calc(100vh - 100px);
+  gap: 0;
+}
+
+.templates-list-panel {
+  width: 260px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid #0f3460;
+}
+
+.templates-list-panel .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.toolbar-btn {
+  background: #0f3460;
+  color: #e0e0e0;
+  border: 1px solid #1a5276;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.toolbar-btn:hover {
+  background: #1a5276;
+}
+
+.templates-filter {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 4px 8px;
+  padding: 4px 8px;
+  background: #111128;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+}
+
+.templates-filter:focus {
+  outline: none;
+  border-color: #1a5276;
+}
+
+.templates-group-header {
+  padding: 4px 12px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #a0a0b0;
+  font-weight: 600;
+  border-top: 1px solid #0f3460;
+  cursor: default;
+  margin-top: 12px !important;
+}
+
+.templates-group-header:first-child {
+  border-top: none;
+}
+
+/* Type sub-headers inherit badge colors */
+.templates-group-header.seg-type-caption,
+.templates-group-header.seg-type-clip,
+.templates-group-header.seg-type-image,
+.templates-group-header.seg-type-pause,
+.templates-group-header.seg-type-stack,
+.templates-group-header.seg-type-tts,
+.templates-group-header.seg-type-file,
+.templates-group-header.seg-type-source {
+  font-size: 11px;
+  padding: 3px 12px;
+  border-top: none;
+}
+
+.templates-editor-panel {
+  flex: 1;
+  overflow-y: auto;
+  background: #111128;
 }
 
 /* Logs tab */
