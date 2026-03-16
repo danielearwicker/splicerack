@@ -16,7 +16,7 @@ SpliceRack.registerType("html", {
     };
   },
 
-  timelineDisplay(seg) {
+  sequenceDisplay(seg) {
     const source = seg.file || "(inline)";
     return {
       title: `HTML: ${source}`,

@@ -25,7 +25,7 @@ SpliceRack.registerType("image", {
     };
   },
 
-  timelineDisplay(seg) {
+  sequenceDisplay(seg) {
     let detail = `${seg.duration || 5}s`;
     const anim = seg.animation as Record<string, unknown> | undefined;
     if (anim && anim.type && anim.type !== "none") {

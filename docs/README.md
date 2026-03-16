@@ -13,7 +13,7 @@ SpliceRack is a YAML-driven video composition system. You define a project in YA
 
 ## Segment Types
 
-Each segment type occupies a slot in the timeline and renders to a video clip.
+Each segment type occupies a slot in the sequence and renders to a video clip.
 
 - [Caption](types/caption.md) — text on a solid background
 - [Clip](types/clip.md) — a time range from a library video

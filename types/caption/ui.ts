@@ -24,7 +24,7 @@ SpliceRack.registerType("caption", {
     };
   },
 
-  timelineDisplay(seg) {
+  sequenceDisplay(seg) {
     return {
       title: (seg.text as string) || "(empty caption)",
       detail: `${seg.duration || 3}s`,

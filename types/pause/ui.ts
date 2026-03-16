@@ -14,7 +14,7 @@ SpliceRack.registerType("pause", {
     };
   },
 
-  timelineDisplay(seg) {
+  sequenceDisplay(seg) {
     return {
       title: "Pause",
       detail: `${seg.duration || 1}s`,

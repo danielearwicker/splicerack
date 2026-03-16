@@ -114,7 +114,7 @@ export interface TypeDefinition {
   schema: PropertySchema[];
   badgeColor?: { bg: string; fg: string };
   defaults: () => Segment;
-  timelineDisplay: (seg: Segment, clipTimes?: { start: number; end: number }) => { title: string; detail: string };
+  sequenceDisplay: (seg: Segment, clipTimes?: { start: number; end: number }) => { title: string; detail: string };
 }
 
 // --- Project ---

@@ -36,7 +36,7 @@ declare global {
   function getMergedTemplates(): Record<string, Record<string, unknown>>;
   function syncYamlFromData(): void;
   function renderEditorPanel(index: number): Promise<void>;
-  function renderTimeline(): Promise<void>;
+  function renderSequence(): Promise<void>;
   function closeEditor(): void;
   function addLog(level: string, message: string): void;
 }

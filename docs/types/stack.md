@@ -19,7 +19,7 @@ Each layer is a regular segment (any built-in type except stack) plus two stack-
 | `opacity` | number | 1 | Layer opacity (0 = transparent, 1 = opaque) |
 | `delay` | number | 0 | Seconds before this layer starts within the stack |
 
-Layers can use templates, just like timeline segments.
+Layers can use templates, just like sequence segments.
 
 ## Example
 

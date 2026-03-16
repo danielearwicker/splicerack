@@ -10,7 +10,7 @@ A YAML-driven video composition system. Define your video as segments in YAML �
 - **Audio system** — per-segment audio layers (native clip audio, TTS, audio files) mixed globally with overlap support
 - **Text-to-speech** — Azure Speech integration with automatic caching
 - **Render caching** — content-addressable caching means only changed segments re-render
-- **Web UI** — library management, clip marking, visual timeline, property editor, render logs
+- **Web UI** — library management, clip marking, visual sequence editor, property editor, render logs
 - **Plugin architecture** — add new segment types by dropping files in a directory
 
 ## Quick Start
@@ -31,7 +31,7 @@ Open http://localhost:3344.
 ## How It Works
 
 1. Upload media to the **Library** tab. Mark named clips on videos.
-2. Create a project in the **Timeline** tab. Build your video in YAML or use the visual editor.
+2. Create a project in the **Sequence** tab. Build your video in YAML or use the visual editor.
 3. Click **Render**. Watch progress in the **Logs** tab.
 4. Review the result in the **Outputs** tab.
 

@@ -20,7 +20,7 @@ SpliceRack.registerType("clip", {
     };
   },
 
-  timelineDisplay(seg, clipTimes) {
+  sequenceDisplay(seg, clipTimes) {
     const title = (seg.clip as string) || (seg.source ? `${seg.source} [${seg.start}-${seg.end}]` : "(no source)");
     const parts = [(seg.source as string) || ""];
     if (clipTimes) {

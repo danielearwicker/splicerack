@@ -19,7 +19,7 @@ SpliceRack.registerType("stack", {
     };
   },
 
-  timelineDisplay(seg) {
+  sequenceDisplay(seg) {
     const layers = (seg.layers as Array<Record<string, unknown>>) || [];
     const types = layers.map((l: Record<string, unknown>) => l.type).join(", ");
     const dur = seg.duration || "auto";

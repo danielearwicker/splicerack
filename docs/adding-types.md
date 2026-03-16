@@ -74,7 +74,7 @@ SpliceRack.registerType("my-type", {
     };
   },
 
-  timelineDisplay(seg) {
+  sequenceDisplay(seg) {
     return {
       title: seg.text || "My Type",
       detail: `${seg.duration || 3}s`,
@@ -105,7 +105,7 @@ Fields support `condition: (seg) => boolean` to conditionally show/hide.
 
 ## ui.css
 
-Optional. Define the badge color for the timeline:
+Optional. Define the badge color for the sequence:
 
 ```css
 .seg-type-my-type { background: #2d3a87; color: #8ab4f8; }

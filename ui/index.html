@@ -16,7 +16,7 @@
     <!-- Tab bar -->
     <div class="tab-bar">
       <button class="tab active" data-tab="library-tab">Library</button>
-      <button class="tab" data-tab="timeline-tab">Timeline</button>
+      <button class="tab" data-tab="sequence-tab">Sequence</button>
       <button class="tab" data-tab="templates-tab">Templates</button>
       <button class="tab" data-tab="outputs-tab">Outputs</button>
       <button class="tab" data-tab="logs-tab">Logs</button>
@@ -77,11 +77,11 @@
       </div>
     </div>
 
-    <!-- Timeline tab -->
-    <div id="timeline-tab" class="tab-content">
-      <div class="timeline-layout">
+    <!-- Sequence tab -->
+    <div id="sequence-tab" class="tab-content">
+      <div class="sequence-layout">
         <!-- Project selector and YAML editor -->
-        <div class="panel timeline-sidebar">
+        <div class="panel sequence-sidebar">
           <div class="panel-header">
             <h2>Project</h2>
           </div>
@@ -99,20 +99,20 @@
           </div>
         </div>
 
-        <!-- Visual timeline -->
-        <div class="panel timeline-main">
+        <!-- Visual sequence -->
+        <div class="panel sequence-main">
           <div class="panel-header">
-            <h2>Timeline</h2>
-            <div class="timeline-toolbar">
+            <h2>Sequence</h2>
+            <div class="sequence-toolbar">
               <button id="btn-undo" class="undo-redo-btn" disabled title="Undo">&#x21A9;</button>
               <button id="btn-redo" class="undo-redo-btn" disabled title="Redo">&#x21AA;</button>
               <select id="add-segment-type"></select>
               <button id="btn-add-segment">+ Add</button>
             </div>
           </div>
-          <div class="timeline-body">
-            <div id="timeline-track" class="timeline-track">
-              <div class="timeline-empty">Open or create a project to start</div>
+          <div class="sequence-body">
+            <div id="sequence-track" class="sequence-track">
+              <div class="sequence-empty">Open or create a project to start</div>
             </div>
             <!-- Segment property editor -->
             <div id="segment-editor" class="segment-editor" style="display:none">
@@ -172,6 +172,10 @@
             <select id="template-type-select"></select>
           </div>
           <div id="template-editor-fields" class="editor-fields"></div>
+          <div id="template-yaml-preview" class="template-yaml-preview" style="display:none">
+            <div class="template-yaml-header">YAML</div>
+            <textarea id="template-yaml" class="template-yaml" spellcheck="false" readonly></textarea>
+          </div>
         </div>
       </div>
     </div>

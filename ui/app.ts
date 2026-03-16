@@ -67,7 +67,7 @@ const markOutDisplay = $("#mark-out-display")!;
 const clipNameInput = $("#clip-name-input") as HTMLInputElement;
 const yamlEditor = $("#yaml-editor") as HTMLTextAreaElement;
 const projectSelect = $("#project-select") as HTMLSelectElement;
-const timelineTrack = $("#timeline-track")!;
+const sequenceTrack = $("#sequence-track")!;
 const renderStatus = $("#render-status")!;
 const renderProgressFill = $("#render-progress-fill")!;
 const renderStatusText = $("#render-status-text")!;
@@ -135,7 +135,7 @@ function formatTime(seconds: number) {
 // --- Routing ---
 const TAB_ROUTES: Record<string, string> = {
   "library-tab": "/library",
-  "timeline-tab": "/timeline",
+  "sequence-tab": "/sequence",
   "templates-tab": "/templates",
   "outputs-tab": "/outputs",
   "logs-tab": "/logs",
@@ -145,14 +145,14 @@ const ROUTE_TABS = Object.fromEntries(Object.entries(TAB_ROUTES).map(([k, v]) =>
 function switchTab(tabId: string, { pushState = true } = {}) {
   $$(".tab").forEach((t) => t.classList.toggle("active", (t as HTMLElement).dataset.tab === tabId));
   $$(".tab-content").forEach((c) => c.classList.toggle("active", c.id === tabId));
-  if (tabId === "timeline-tab") loadProjects();
+  if (tabId === "sequence-tab") loadProjects();
   if (tabId === "templates-tab") loadTemplatesList();
   if (tabId === "outputs-tab") loadOutputs();
 
   if (pushState) {
     const basePath = TAB_ROUTES[tabId] || "/";
     let fullPath = basePath;
-    if (tabId === "timeline-tab" && currentProject) {
+    if (tabId === "sequence-tab" && currentProject) {
       fullPath = `${basePath}/${encodeURIComponent(currentProject)}`;
     } else if (tabId === "templates-tab" && currentTemplateName) {
       fullPath = `${basePath}/${encodeURIComponent(currentTemplateName)}`;
@@ -168,7 +168,7 @@ function switchTab(tabId: string, { pushState = true } = {}) {
 function updateRoute() {
   const basePath = TAB_ROUTES[getActiveTab()] || "/";
   let fullPath = basePath;
-  if (getActiveTab() === "timeline-tab" && currentProject) {
+  if (getActiveTab() === "sequence-tab" && currentProject) {
     fullPath = `${basePath}/${encodeURIComponent(currentProject)}`;
   } else if (getActiveTab() === "templates-tab" && currentTemplateName) {
     fullPath = `${basePath}/${encodeURIComponent(currentTemplateName)}`;
@@ -202,7 +202,7 @@ function navigateFromUrl() {
 
   switchTab(tabId, { pushState: false });
 
-  if (tabId === "timeline-tab" && param) {
+  if (tabId === "sequence-tab" && param) {
     loadProjects().then(() => {
       projectSelect.value = param;
       loadProject(param);
@@ -435,7 +435,7 @@ function renderClips() {
 }
 
 // =====================================================
-// TIMELINE / PROJECT
+// SEQUENCE / PROJECT
 // =====================================================
 
 // --- Projects ---
@@ -462,7 +462,7 @@ projectSelect.addEventListener("change", () => {
     currentProject = null;
     projectData = null;
     yamlEditor.value = "";
-    renderTimeline();
+    renderSequence();
   }
 });
 
@@ -508,7 +508,7 @@ async function loadProject(filename: string) {
     } else {
       projectData = null;
     }
-    renderTimeline();
+    renderSequence();
     updateRoute();
   } catch (err) {
     console.error("Failed to load project:", err);
@@ -534,7 +534,7 @@ async function saveYaml() {
     });
     const data = await res.json();
     if (data.ok) {
-      // Re-parse to update timeline
+      // Re-parse to update sequence
       parseYamlAndRender();
       loadProjects();
     }
@@ -561,14 +561,14 @@ async function saveYamlQuiet() {
 function parseYamlAndRender() {
   try {
     // Simple YAML-like parsing for display purposes
-    // The server does the real parsing - we just need to show the timeline
+    // The server does the real parsing - we just need to show the sequence
     const text = yamlEditor.value;
     // Fetch parsed version from server
     fetch(`/api/project/${encodeURIComponent(currentProject!)}`)
       .then((r) => r.json())
       .then((data) => {
         projectData = data.parsed;
-        renderTimeline();
+        renderSequence();
       });
   } catch (err) {
     console.error("Parse error:", err);
@@ -819,7 +819,7 @@ document.addEventListener("keydown", (e) => {
 function closeEditor() {
   segmentEditor.style.display = "none";
   selectedSegmentIndex = null;
-  $$(".timeline-segment.selected").forEach((s: Element) => s.classList.remove("selected"));
+  $$(".sequence-segment.selected").forEach((s: Element) => s.classList.remove("selected"));
 }
 
 // Segment toolbar actions
@@ -1489,12 +1489,12 @@ function updateSegmentProperty(index: number, key: string, value: any) {
   syncYamlFromData();
 }
 
-// --- Timeline rendering ---
-async function renderTimeline() {
-  timelineTrack.innerHTML = "";
+// --- Sequence rendering ---
+async function renderSequence() {
+  sequenceTrack.innerHTML = "";
 
   if (!projectData || !projectData.timeline || projectData.timeline.length === 0) {
-    timelineTrack.innerHTML = '<div class="timeline-empty">No segments in timeline</div>';
+    sequenceTrack.innerHTML = '<div class="sequence-empty">No segments in sequence</div>';
     return;
   }
 
@@ -1503,7 +1503,7 @@ async function renderTimeline() {
   // Resolve templates for display
   const resolved = projectData.timeline.map((seg: any) => resolveTemplate(seg, templates));
 
-  // Pre-fetch clip metadata for all sources referenced in timeline
+  // Pre-fetch clip metadata for all sources referenced in sequence
   const sources = [...new Set<string>(
     resolved
       .filter((s: any) => s.type === "clip" && s.source)
@@ -1518,7 +1518,7 @@ async function renderTimeline() {
     const templateName = isKnownType(rawSeg.type) ? null : rawSeg.type;
 
     const div = document.createElement("div");
-    div.className = "timeline-segment";
+    div.className = "sequence-segment";
     div.draggable = true;
     div.dataset.index = String(index);
 
@@ -1551,8 +1551,8 @@ async function renderTimeline() {
     detail.className = "seg-detail";
 
     const typeDef = SpliceRack.types[seg.type];
-    if (typeDef && typeDef.timelineDisplay) {
-      const display = typeDef.timelineDisplay(seg, clipTimes ?? undefined);
+    if (typeDef && typeDef.sequenceDisplay) {
+      const display = typeDef.sequenceDisplay(seg, clipTimes ?? undefined);
       title.textContent = display.title;
       detail.textContent = display.detail;
     } else {
@@ -1568,7 +1568,7 @@ async function renderTimeline() {
 
     // Click to select and open editor
     div.addEventListener("click", () => {
-      $$(".timeline-segment.selected").forEach((s: Element) => s.classList.remove("selected"));
+      $$(".sequence-segment.selected").forEach((s: Element) => s.classList.remove("selected"));
       div.classList.add("selected");
       selectYamlSegment(index);
       renderEditorPanel(index);
@@ -1583,7 +1583,7 @@ async function renderTimeline() {
 
     div.addEventListener("dragend", () => {
       div.classList.remove("dragging");
-      $$(".timeline-segment").forEach((s: Element) => s.classList.remove("drag-over"));
+      $$(".sequence-segment").forEach((s: Element) => s.classList.remove("drag-over"));
     });
 
     div.addEventListener("dragover", (e) => {
@@ -1605,13 +1605,13 @@ async function renderTimeline() {
       dragSrcIndex = null;
     });
 
-    timelineTrack.appendChild(div);
+    sequenceTrack.appendChild(div);
   });
 }
 
 function selectYamlSegment(index: number) {
   const text = yamlEditor.value;
-  // Find top-level timeline segment starts: exactly "  - type:" (2-space indent)
+  // Find top-level sequence segment starts: exactly "  - type:" (2-space indent)
   // Not deeper-nested ones inside layers/audio arrays
   const pattern = /^  - type:/gm;
   const starts = [];
@@ -1764,9 +1764,9 @@ function syncYamlFromData() {
 
   yamlEditor.value = lines.join("\n");
   // Save without re-parsing — our in-memory projectData is the source of truth.
-  // Re-render the timeline directly from the in-memory data.
+  // Re-render the sequence directly from the in-memory data.
   saveYamlQuiet();
-  renderTimeline();
+  renderSequence();
 }
 
 // --- Add segment ---
@@ -1907,7 +1907,7 @@ function connectWS() {
     } else if (msg.type === "clips-updated") {
       delete clipCache[msg.filename];
       if (msg.filename === currentFile) loadClips();
-      if (projectData) renderTimeline();
+      if (projectData) renderSequence();
     } else if (msg.type === "project-updated") {
       loadProjects();
     } else if (msg.type === "render-started") {
@@ -1948,7 +1948,7 @@ function connectWS() {
       loadExternalTemplates().then(() => {
         refreshAddSegmentDropdown();
         if (getActiveTab() === "templates-tab") loadTemplatesList();
-        if (projectData) renderTimeline();
+        if (projectData) renderSequence();
       });
     } else if (msg.type === "render-phase") {
       logsProgressText.textContent = msg.phase;
@@ -2082,11 +2082,15 @@ async function selectTemplate(name: string) {
 }
 
 function renderTemplateEditor() {
+  const yamlPreview = $("#template-yaml-preview") as HTMLElement;
+  const yamlTextarea = $("#template-yaml") as HTMLTextAreaElement;
+
   if (!currentTemplateData || !currentTemplateName) {
     templateEditorTitle.textContent = "Select a template";
     templateEditorFields.innerHTML = "";
     templateTypeRow.style.display = "none";
     $("#btn-delete-template")!.style.display = "none";
+    yamlPreview.style.display = "none";
     return;
   }
 
@@ -2106,6 +2110,64 @@ function renderTemplateEditor() {
   }
 
   renderTemplateFields();
+  yamlPreview.style.display = "";
+  updateTemplateYamlPreview();
+}
+
+// Strip properties that match the type's schema defaults.
+// Always keeps "type". For nested objects (like style), strips matching sub-keys.
+function stripDefaults(data: Record<string, any>): Record<string, any> {
+  const typeName = data.type;
+  const typeDef = SpliceRack.types[typeName];
+  const schema = typeDef ? typeDef.schema : AUDIO_LAYER_SCHEMAS[typeName];
+  if (!schema) return data;
+
+  // Build a map of key -> default value from the schema
+  const defaults: Record<string, any> = {};
+  for (const prop of schema) {
+    if (prop.default !== undefined) defaults[prop.key] = prop.default;
+  }
+
+  const result: Record<string, any> = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (k === "type") { result[k] = v; continue; }
+    if (v === undefined) continue;
+
+    // Check if this is a nested key (e.g. "style.align" -> nested in style object)
+    // Schema keys use dot notation but data uses nested objects
+    if (typeof v === "object" && v !== null && !Array.isArray(v)) {
+      // For nested objects, check each sub-key against schema defaults
+      const cleaned: Record<string, any> = {};
+      for (const [sk, sv] of Object.entries(v)) {
+        const schemaKey = `${k}.${sk}`;
+        if (defaults[schemaKey] !== undefined && JSON.stringify(sv) === JSON.stringify(defaults[schemaKey])) continue;
+        cleaned[sk] = sv;
+      }
+      if (Object.keys(cleaned).length > 0) result[k] = cleaned;
+    } else {
+      // Flat key — check against schema default
+      if (defaults[k] !== undefined && JSON.stringify(v) === JSON.stringify(defaults[k])) continue;
+      result[k] = v;
+    }
+  }
+  return result;
+}
+
+function updateTemplateYamlPreview() {
+  const yamlTextarea = $("#template-yaml") as HTMLTextAreaElement;
+  if (!currentTemplateData) { yamlTextarea.value = ""; return; }
+  const cleaned = stripDefaults(currentTemplateData);
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(cleaned)) {
+    if (v === undefined) continue;
+    const rendered = yamlValue(v as any, "");
+    if (rendered.startsWith("\n")) {
+      lines.push(`${k}:${rendered}`);
+    } else {
+      lines.push(`${k}: ${rendered}`);
+    }
+  }
+  yamlTextarea.value = lines.join("\n");
 }
 
 function renderTemplateFields() {
@@ -2166,6 +2228,7 @@ function renderTemplateFields() {
 
 let templateSaveTimer: ReturnType<typeof setTimeout> | null = null;
 function autoSaveTemplate() {
+  updateTemplateYamlPreview();
   if (templateSaveTimer) clearTimeout(templateSaveTimer);
   templateSaveTimer = setTimeout(async () => {
     if (!currentTemplateName || !currentTemplateData) return;
@@ -2173,7 +2236,7 @@ function autoSaveTemplate() {
       await fetch(`/api/template/${encodeURIComponent(currentTemplateName)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parsed: currentTemplateData }),
+        body: JSON.stringify({ parsed: stripDefaults(currentTemplateData) }),
       });
     } catch (err) {
       console.error("Failed to save template:", err);

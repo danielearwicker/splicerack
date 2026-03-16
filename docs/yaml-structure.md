@@ -60,7 +60,7 @@ timeline:
 
 ## Audio Layers
 
-Any segment can have an `audio` array. Audio layers are positioned by their segment's place in the timeline plus an optional `delay` (which can be negative). Audio runs its full natural length regardless of segment boundaries.
+Any segment can have an `audio` array. Audio layers are positioned by their segment's place in the sequence plus an optional `delay` (which can be negative). Audio runs its full natural length regardless of segment boundaries.
 
 ```yaml
   - type: clip

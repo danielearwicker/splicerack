@@ -511,7 +511,7 @@ app.post("/api/render/:filename", async (req, res) => {
   const timeline = resolveTemplates(project);
 
   if (timeline.length === 0) {
-    return res.status(400).json({ error: "Timeline is empty" });
+    return res.status(400).json({ error: "Sequence is empty" });
   }
 
   // Timestamp the output so each render is preserved

@@ -1,6 +1,6 @@
 # Audio System
 
-Audio in SpliceRack is a global timeline layered on top of the video. Audio layers are attached to segments but are not clipped to segment boundaries — they run their full natural length and can overlap freely.
+Audio in SpliceRack is a global layer on top of the video sequence. Audio layers are attached to segments but are not clipped to segment boundaries — they run their full natural length and can overlap freely.
 
 ## Per-Segment Audio
 
