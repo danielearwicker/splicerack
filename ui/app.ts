@@ -1681,6 +1681,7 @@ function renderTimelinePane() {
   const boxes: Array<{
     segIndex: number; x: number; width: number; track: number;
     bg: string; fg: string; title: string; duration: number;
+    isStackBg?: boolean;
   }> = [];
   let maxTrack = 0;
   let cumTime = 0;
@@ -1701,18 +1702,31 @@ function renderTimelinePane() {
           title: "Stack (empty)", duration: segDur,
         });
       } else {
+        // Add a faint background bar spanning all tracks for the stack's full duration
+        for (let t = 0; t < layers.length; t++) {
+          boxes.push({
+            segIndex: i, x: xPx, width: wPx, track: t,
+            bg: "rgba(74, 58, 106, 0.2)", fg: "transparent",
+            title: "", duration: segDur, isStackBg: true,
+          });
+          maxTrack = Math.max(maxTrack, t);
+        }
+        // Add layer boxes, clamped to the stack's total duration
         for (let li = 0; li < layers.length; li++) {
           const layer = resolveTemplate(layers[li], templates);
           const layerDelay = layers[li].delay || 0;
           const layerDur = getSegmentDuration(layer);
+          // Clamp: layer can't extend past the stack's total duration
+          const clampedDur = Math.min(layerDur, segDur - layerDelay);
+          if (clampedDur <= 0) continue; // layer starts after stack ends
           const layerX = xPx + layerDelay * pixelsPerSecond;
-          const layerW = layerDur * pixelsPerSecond;
+          const layerW = clampedDur * pixelsPerSecond;
           const td = SpliceRack.types[layer.type];
           const display = td?.sequenceDisplay?.(layer);
           boxes.push({
             segIndex: i, x: layerX, width: layerW, track: li,
             bg: td?.badgeColor?.bg || "#333", fg: td?.badgeColor?.fg || "#ccc",
-            title: display?.title || layer.type, duration: layerDur,
+            title: display?.title || layer.type, duration: clampedDur,
           });
           maxTrack = Math.max(maxTrack, li);
         }
@@ -1764,8 +1778,6 @@ function renderTimelinePane() {
   // Render segment boxes
   for (const box of boxes) {
     const el = document.createElement("div");
-    el.className = "tl-seg";
-    if (box.segIndex === selectedSegmentIndex) el.classList.add("selected");
 
     // Track 0 = bottom row
     const topPx = (maxTrack - box.track) * TRACK_HEIGHT + TRACK_PAD;
@@ -1774,8 +1786,22 @@ function renderTimelinePane() {
     el.style.width = Math.max(box.width, 3) + "px";
     el.style.height = (TRACK_HEIGHT - TRACK_PAD * 2) + "px";
     el.style.background = box.bg;
-    el.style.color = box.fg;
     el.dataset.segIndex = String(box.segIndex);
+
+    if (box.isStackBg) {
+      // Background extent bar — non-interactive, no border
+      el.className = "tl-stack-bg";
+      el.style.position = "absolute";
+      el.style.borderRadius = "3px";
+      el.style.pointerEvents = "none";
+      el.style.boxSizing = "border-box";
+      timelineCanvas.appendChild(el);
+      continue;
+    }
+
+    el.className = "tl-seg";
+    el.style.color = box.fg;
+    if (box.segIndex === selectedSegmentIndex) el.classList.add("selected");
 
     const titleSpan = document.createElement("span");
     titleSpan.className = "tl-title";
