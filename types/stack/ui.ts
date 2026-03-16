@@ -1,6 +1,7 @@
 SpliceRack.registerType("stack", {
   schema: [
     { key: "duration", label: "Duration", type: "number", default: 0, min: 0, max: 300, step: 0.1 },
+    { key: "crop", label: "Crop layers", type: "dropdown", default: "true", options: ["true", "false"] },
     { key: "background", label: "Background", type: "color", default: "#1a1a2e" },
     { key: "layers", label: "Layers", type: "layers" },
   ],

@@ -1,4 +1,4 @@
-import { H264_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, colorInputArgs, probeJson } from "../../shared/ffmpeg.ts";
+import { ALPHA_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, colorInputArgs, probeJson } from "../../shared/ffmpeg.ts";
 import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
 
 export default {
@@ -14,7 +14,7 @@ export default {
       await ctx.execFileAsync("ffmpeg", [
         "-y",
         ...colorInputArgs(bgColor, ctx.width, ctx.height, duration, ctx.fps),
-        ...H264_ARGS,
+        ...ALPHA_ARGS,
         "-t", String(duration), outFile,
       ], FFMPEG_MAX_BUFFER);
       return;
@@ -25,7 +25,7 @@ export default {
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
 
-      const layerFile = ctx.join(ctx.OUTPUT_DIR, `_stack_layer_${i}_${Date.now()}.mp4`);
+      const layerFile = ctx.join(ctx.OUTPUT_DIR, `_stack_layer_${i}_${Date.now()}.mov`);
       layerFiles.push(layerFile);
 
       // Build a segment for the sub-renderer (without stack-specific props)
@@ -108,7 +108,7 @@ export default {
       ...inputs,
       "-filter_complex_script", filterScript,
       "-map", "[final]",
-      ...H264_ARGS,
+      ...ALPHA_ARGS,
       "-t", String(totalDuration),
       outFile,
     ], FFMPEG_MAX_BUFFER);

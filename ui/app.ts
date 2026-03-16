@@ -1133,7 +1133,6 @@ async function renderEditorPanel(index: number) {
           delayLabel.textContent = "Delay";
           const delayInput = document.createElement("input");
           delayInput.type = "number";
-          delayInput.min = "0";
           delayInput.step = "0.1";
           delayInput.value = layer.delay || 0;
           delayInput.addEventListener("change", () => {
@@ -1677,13 +1676,13 @@ function renderTimelinePane() {
   const templates = getMergedTemplates();
   const resolved = projectData.timeline.map((seg: any) => resolveTemplate(seg, templates));
 
-  // Build boxes: { segIndex, x, width, track, bg, fg, title, duration }
+  // Build boxes with compositing layer, then resolve tracks from overlaps
   const boxes: Array<{
     segIndex: number; x: number; width: number; track: number;
+    compositeLayer: number; // intended layer for compositing
     bg: string; fg: string; title: string; duration: number;
     isStackBg?: boolean;
   }> = [];
-  let maxTrack = 0;
   let cumTime = 0;
 
   for (let i = 0; i < resolved.length; i++) {
@@ -1697,7 +1696,7 @@ function renderTimelinePane() {
       if (layers.length === 0) {
         const td = SpliceRack.types["stack"];
         boxes.push({
-          segIndex: i, x: xPx, width: wPx, track: 0,
+          segIndex: i, x: xPx, width: wPx, track: 0, compositeLayer: 0,
           bg: td?.badgeColor?.bg || "#4a3a6a", fg: td?.badgeColor?.fg || "#c8a0f0",
           title: "Stack (empty)", duration: segDur,
         });
@@ -1705,30 +1704,28 @@ function renderTimelinePane() {
         // Add a faint background bar spanning all tracks for the stack's full duration
         for (let t = 0; t < layers.length; t++) {
           boxes.push({
-            segIndex: i, x: xPx, width: wPx, track: t,
+            segIndex: i, x: xPx, width: wPx, track: t, compositeLayer: t,
             bg: "rgba(74, 58, 106, 0.2)", fg: "transparent",
             title: "", duration: segDur, isStackBg: true,
           });
-          maxTrack = Math.max(maxTrack, t);
         }
         // Add layer boxes, clamped to the stack's total duration
         for (let li = 0; li < layers.length; li++) {
           const layer = resolveTemplate(layers[li], templates);
           const layerDelay = layers[li].delay || 0;
           const layerDur = getSegmentDuration(layer);
-          // Clamp: layer can't extend past the stack's total duration
-          const clampedDur = Math.min(layerDur, segDur - layerDelay);
-          if (clampedDur <= 0) continue; // layer starts after stack ends
-          const layerX = xPx + layerDelay * pixelsPerSecond;
-          const layerW = clampedDur * pixelsPerSecond;
+          const crop = seg.crop !== false; // default true
+          const effectiveDur = crop ? Math.min(layerDur, segDur - layerDelay) : layerDur;
+          if (crop && effectiveDur <= 0) continue;
+          const layerX = xPx + layerDelay * pixelsPerSecond; // can be negative (bleeds left)
+          const layerW = effectiveDur * pixelsPerSecond;
           const td = SpliceRack.types[layer.type];
           const display = td?.sequenceDisplay?.(layer);
           boxes.push({
-            segIndex: i, x: layerX, width: layerW, track: li,
+            segIndex: i, x: layerX, width: layerW, track: li, compositeLayer: li,
             bg: td?.badgeColor?.bg || "#333", fg: td?.badgeColor?.fg || "#ccc",
-            title: display?.title || layer.type, duration: clampedDur,
+            title: display?.title || layer.type, duration: effectiveDur,
           });
-          maxTrack = Math.max(maxTrack, li);
         }
       }
     } else {
@@ -1741,13 +1738,66 @@ function renderTimelinePane() {
       })() : null;
       const display = td?.sequenceDisplay?.(seg, clipTimes ?? undefined);
       boxes.push({
-        segIndex: i, x: xPx, width: wPx, track: 0,
+        segIndex: i, x: xPx, width: wPx, track: 0, compositeLayer: 0,
         bg: td?.badgeColor?.bg || "#333", fg: td?.badgeColor?.fg || "#ccc",
         title: display?.title || seg.type, duration: segDur,
       });
     }
 
     cumTime += segDur;
+  }
+
+  // Resolve track assignments: same composite layer + time overlap = bump to higher track.
+  // Non-background boxes sorted by composite layer then x position.
+  // Later segments (higher segIndex) get priority (higher track) on overlap.
+  const contentBoxes = boxes.filter(b => !b.isStackBg);
+  contentBoxes.sort((a, b) => a.compositeLayer - b.compositeLayer || a.x - b.x);
+
+  // For each composite layer, pack into visual tracks avoiding overlaps
+  const trackOccupancy: Array<Array<{ start: number; end: number }>> = [];
+
+  // Track which track each segment+layer was assigned to, so higher layers
+  // in the same segment stay above lower layers.
+  const segLayerTracks: Record<string, number> = {};
+
+  for (const box of contentBoxes) {
+    const boxEnd = box.x + box.width;
+    // Minimum track: must be above any lower composite layer in the same segment
+    let minTrack = 0;
+    for (let cl = 0; cl < box.compositeLayer; cl++) {
+      const key = `${box.segIndex}:${cl}`;
+      if (segLayerTracks[key] != null) {
+        minTrack = Math.max(minTrack, segLayerTracks[key] + 1);
+      }
+    }
+    // Find the lowest track >= minTrack where this box doesn't overlap
+    let track = minTrack;
+    while (true) {
+      if (!trackOccupancy[track]) trackOccupancy[track] = [];
+      // Check for actual time-range intersection (not just "starts before something ends")
+      const hasOverlap = trackOccupancy[track].some(occ => box.x < occ.end - 1 && boxEnd > occ.start + 1);
+      if (!hasOverlap) break;
+      track++;
+    }
+    trackOccupancy[track] = trackOccupancy[track] || [];
+    trackOccupancy[track].push({ start: box.x, end: boxEnd });
+    box.track = track;
+    segLayerTracks[`${box.segIndex}:${box.compositeLayer}`] = track;
+  }
+
+  // Update background boxes to match their content's track range
+  for (const bg of boxes.filter(b => b.isStackBg)) {
+    // Find the max track used by content in the same segment at the same compositeLayer
+    const maxContentTrack = contentBoxes
+      .filter(b => b.segIndex === bg.segIndex && b.compositeLayer === bg.compositeLayer)
+      .reduce((max, b) => Math.max(max, b.track), bg.compositeLayer);
+    bg.track = maxContentTrack;
+  }
+
+  // Compute maxTrack from resolved tracks
+  let maxTrack = 0;
+  for (const box of boxes) {
+    maxTrack = Math.max(maxTrack, box.track);
   }
 
   // Set canvas dimensions
@@ -2230,6 +2280,35 @@ function connectWS() {
     } else if (msg.type === "audio-warning") {
       for (const err of msg.errors) addLog("warning", `Audio: ${err}`);
       renderStatusText.textContent = `Audio warning: ${msg.errors.join("; ")}`;
+    } else if (msg.type === "ffmpeg-slots") {
+      // Clear all FFmpeg slot panes
+      const container = $("#ffmpeg-slots-container")!;
+      container.innerHTML = "";
+    } else if (msg.type === "ffmpeg-slot") {
+      // Update or create an FFmpeg slot pane
+      const container = $("#ffmpeg-slots-container")!;
+      let slotEl = container.querySelector(`[data-slot="${msg.slot}"]`) as HTMLElement | null;
+      if (!slotEl) {
+        slotEl = document.createElement("div");
+        slotEl.className = "ffmpeg-slot";
+        slotEl.dataset.slot = String(msg.slot);
+        const header = document.createElement("div");
+        header.className = "ffmpeg-slot-header";
+        header.textContent = msg.label || `Slot ${msg.slot}`;
+        slotEl.appendChild(header);
+        const output = document.createElement("div");
+        output.className = "ffmpeg-slot-output";
+        slotEl.appendChild(output);
+        container.appendChild(slotEl);
+      }
+      const header = slotEl.querySelector(".ffmpeg-slot-header") as HTMLElement;
+      if (msg.label) header.textContent = msg.label;
+      const output = slotEl.querySelector(".ffmpeg-slot-output") as HTMLElement;
+      output.textContent = msg.line || "";
+      if (msg.done) {
+        slotEl.classList.add("done");
+        setTimeout(() => { if (slotEl && slotEl.parentNode) slotEl.parentNode.removeChild(slotEl); }, 1000);
+      }
     } else if (msg.type === "render-error") {
       for (const err of msg.errors) addLog("error", err);
       renderStatusText.textContent = `Render failed: ${msg.errors.join("; ")}`;

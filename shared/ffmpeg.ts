@@ -3,6 +3,9 @@
 /** Standard H.264 encoding arguments used across all segment renderers. */
 export const H264_ARGS = ["-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p"] as const;
 
+/** Alpha-capable encoding arguments for intermediate element renders (PNG codec in .mov container). */
+export const ALPHA_ARGS = ["-c:v", "png", "-pix_fmt", "rgba"] as const;
+
 /** Default maxBuffer for FFmpeg/FFprobe child processes (50 MB). */
 export const FFMPEG_MAX_BUFFER = { maxBuffer: 50 * 1024 * 1024 } as const;
 
@@ -28,6 +31,37 @@ export function colorInputArgs(bgColor: string, width: number, height: number, d
 /** Build a scale+pad filter that fits video into target dimensions, preserving aspect ratio. */
 export function scalePadFilter(width: number, height: number): string {
   return `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`;
+}
+
+import { spawn } from "child_process";
+
+/**
+ * Spawn an FFmpeg process and stream its stderr output line by line via a callback.
+ * Returns a promise that resolves when the process completes.
+ */
+export function spawnFFmpeg(
+  args: string[],
+  onStderr: (line: string) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffmpeg", args, { stdio: ["pipe", "pipe", "pipe"] });
+    let errBuf = "";
+    proc.stderr.on("data", (chunk: Buffer) => {
+      errBuf += chunk.toString();
+      const lines = errBuf.split("\r");
+      errBuf = lines.pop() || "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) onStderr(trimmed);
+      }
+    });
+    proc.on("close", (code: number | null) => {
+      if (errBuf.trim()) onStderr(errBuf.trim());
+      if (code === 0) resolve();
+      else reject(new Error(`FFmpeg exited with code ${code}`));
+    });
+    proc.on("error", reject);
+  });
 }
 
 /** Run ffprobe and parse JSON output. Returns the parsed JSON object. */

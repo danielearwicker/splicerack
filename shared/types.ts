@@ -15,7 +15,29 @@ export interface BaseSegment {
   "fade-out"?: number;
   audio?: AudioLayerDef[];
   keyframes?: KeyframeDef[];
+  crop?: boolean; // For stacks: crop layers to segment duration. Default true.
   [key: string]: unknown;
+}
+
+// --- Compositing plan (global render pipeline) ---
+export interface ElementSpec {
+  seg: BaseSegment;         // The element's data (for renderCached)
+  segmentIndex: number;     // Index in the timeline
+  layerIndex: number;       // 0 for non-stacks, N for stack layer N
+  delay: number;            // Delay relative to segment start (can be negative)
+  opacity: number;          // 0-1
+  segmentSlotDuration: number; // The segment's time allocation in the sequence
+  crop: boolean;            // Whether to clip to segment slot
+}
+
+export interface CompositingElement {
+  file: string;             // Path to rendered element .mp4
+  absoluteStart: number;    // Seconds from sequence start
+  duration: number;         // Actual duration (probed)
+  layer: number;            // 0 = bottom
+  segmentIndex: number;
+  layerIndex: number;
+  opacity: number;
 }
 
 export interface CaptionStyle {

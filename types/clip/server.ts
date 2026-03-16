@@ -1,5 +1,5 @@
 import { buildTextAlignmentExpr } from "../_helpers.ts";
-import { H264_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, escapeDrawtext, scalePadFilter } from "../../shared/ffmpeg.ts";
+import { ALPHA_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, escapeDrawtext, scalePadFilter } from "../../shared/ffmpeg.ts";
 import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
 
 export default {
@@ -62,7 +62,7 @@ export default {
       "-to", String(end),
       "-i", sourcePath,
       ...filterArgs,
-      ...H264_ARGS,
+      ...ALPHA_ARGS,
       "-an",
       "-r", String(ctx.fps),
       outFile,

@@ -1,4 +1,4 @@
-import { H264_ARGS, FFMPEG_MAX_BUFFER, scalePadFilter } from "../../shared/ffmpeg.ts";
+import { ALPHA_ARGS, FFMPEG_MAX_BUFFER, scalePadFilter } from "../../shared/ffmpeg.ts";
 import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
 
 export default {
@@ -40,7 +40,7 @@ export default {
       "-loop", "1",
       "-i", sourcePath,
       "-vf", vf,
-      ...H264_ARGS,
+      ...ALPHA_ARGS,
       "-t", String(duration),
       "-r", String(ctx.fps),
       outFile,

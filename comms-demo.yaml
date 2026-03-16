@@ -5,7 +5,19 @@ output:
   background: "#1a1a2e"
 
 timeline:
-  - type: logo intro
+  - type: stack
+    background: "#1a1a2e"
+    layers:
+      - type: "image"
+        source: "screenshot.png"
+        duration: 2.5
+        fade-in: 0
+        fade-out: 0.5
+        opacity: 1
+        delay: 0
+      - type: "logo intro"
+        opacity: 1
+        delay: 0
 
   - type: heading
     text: "Comms Explainer Demo Thingy"
@@ -14,17 +26,23 @@ timeline:
     background: "#1a1a2e"
     layers:
       - type: "heading"
-        text: "peas"
-        style:
-          font-size: 48
-          align: "left"
-        opacity: 0.5
-      - type: "heading"
         text: "chips"
         style:
           font-size: 48
           align: "right"
+          background: "transparent"
         opacity: 0.5
+        delay: -1
+      - type: "heading"
+        text: "peas"
+        style:
+          font-size: 48
+          align: "left"
+          background: "transparent"
+        opacity: 0.5
+        delay: 0.5
+    duration: 3
+    crop: false
 
   - type: section title
     text: "How information flows"
@@ -117,7 +135,7 @@ timeline:
     clip: "email"
 
   - type: heading
-    text: "Thanks for watching!"
+    text: "Thanks for nothing!"
     style:
       color: "#e94560"
       font-size: 48

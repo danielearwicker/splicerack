@@ -217,18 +217,26 @@
     </div>
     <!-- Logs tab -->
     <div id="logs-tab" class="tab-content">
-      <div class="panel logs-panel">
-        <div class="panel-header">
-          <h2>Logs</h2>
-          <button id="btn-clear-logs" class="clear-logs-btn">Clear</button>
-        </div>
-        <div id="logs-progress" class="logs-progress" style="display:none">
-          <div class="render-progress-bar">
-            <div id="logs-progress-fill" class="render-progress-fill"></div>
+      <div class="logs-split">
+        <div class="panel logs-panel">
+          <div class="panel-header">
+            <h2>Logs</h2>
+            <button id="btn-clear-logs" class="clear-logs-btn">Clear</button>
           </div>
-          <span id="logs-progress-text"></span>
+          <div id="logs-progress" class="logs-progress" style="display:none">
+            <div class="render-progress-bar">
+              <div id="logs-progress-fill" class="render-progress-fill"></div>
+            </div>
+            <span id="logs-progress-text"></span>
+          </div>
+          <div id="logs-container" class="logs-container"></div>
         </div>
-        <div id="logs-container" class="logs-container"></div>
+        <div class="panel ffmpeg-slots-panel" id="ffmpeg-slots-panel">
+          <div class="panel-header">
+            <h2>FFmpeg Processes</h2>
+          </div>
+          <div id="ffmpeg-slots-container" class="ffmpeg-slots-container"></div>
+        </div>
       </div>
     </div>
   </div>

@@ -3,6 +3,7 @@ import { join } from "path";
 import { mkdirSync, existsSync, unlinkSync, readdirSync } from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { ALPHA_ARGS } from "../shared/ffmpeg.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -68,21 +69,18 @@ export async function renderHtmlToVideo({ html, width, height, fps, duration, ou
       await page.evaluate(() => new Promise((r) => requestAnimationFrame(r)));
 
       const framePath = join(framesDir, `frame_${String(frame).padStart(6, "0")}.png`);
-      await page.screenshot({ path: framePath, type: "png" });
+      await page.screenshot({ path: framePath, type: "png", omitBackground: true });
     }
   } finally {
     if (browser) await browser.close();
   }
 
-  // Stitch frames into MP4 with FFmpeg
+  // Stitch frames into alpha-capable video with FFmpeg (PNG codec for transparency)
   await execFileAsync("ffmpeg", [
     "-y",
     "-framerate", String(fps),
     "-i", join(framesDir, "frame_%06d.png"),
-    "-c:v", "libx264",
-    "-preset", "fast",
-    "-pix_fmt", "yuv420p",
-    "-movflags", "+faststart",
+    ...ALPHA_ARGS,
     outFile,
   ], { maxBuffer: 50 * 1024 * 1024 });
 

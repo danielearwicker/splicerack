@@ -2,6 +2,7 @@ import express from "express";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import multer from "multer";
+import { cpus } from "os";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from "fs";
 import { join, basename, extname } from "path";
 import { fileURLToPath } from "url";
@@ -16,11 +17,39 @@ import { buildFadeFilter, buildKeyframeFilter } from "./types/_helpers.ts";
 import { getVoices, synthesize } from "./services/tts.ts";
 import { deterministicHash } from "./shared/hash.ts";
 import { deepMerge } from "./shared/deep-merge.ts";
-import { H264_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, probeJson } from "./shared/ffmpeg.ts";
+import { H264_ARGS, ALPHA_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, probeJson, spawnFFmpeg } from "./shared/ffmpeg.ts";
 import { loadYamlFile, listFilesByExt } from "./shared/yaml-utils.ts";
 import tsBlankSpace from "ts-blank-space";
 
 const execFileAsync = promisify(execFile);
+
+// Parallel task execution with concurrency limit
+const PARALLEL_LIMIT = Math.max(2, Math.min(6, Math.floor(cpus().length / 2)));
+
+// FFmpeg slot tracking for live stderr streaming
+let nextSlotId = 0;
+function allocSlot(): number { return nextSlotId++; }
+function resetSlots() { nextSlotId = 0; }
+
+async function parallelMap<T, R>(
+  items: T[],
+  fn: (item: T, index: number) => Promise<R>,
+  concurrency: number = PARALLEL_LIMIT
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const i = nextIndex++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
 
 function stripTypes(src: string): string {
   return tsBlankSpace(src);
@@ -278,7 +307,7 @@ if (!existsSync(CACHE_DIR)) {
   mkdirSync(CACHE_DIR, { recursive: true });
 }
 
-// Content-addressable render cache: hash segment settings → cached .mp4
+// Content-addressable render cache: hash segment settings → cached .mov (alpha-capable)
 function segmentHash(seg: any) {
   // Include modification times of referenced library files so edits invalidate cache.
   let fileMeta = "";
@@ -292,7 +321,7 @@ function segmentHash(seg: any) {
 }
 
 function getCachePath(hash: string) {
-  return join(CACHE_DIR, `${hash}.mp4`);
+  return join(CACHE_DIR, `${hash}.mov`);
 }
 
 // --- Audio mixer ---
@@ -364,11 +393,11 @@ async function renderCached(seg: any, outFile: string, ctx: any) {
 
     const kfFilter = buildKeyframeFilter(seg.keyframes, ctx.fps, srcW, srcH, ctx.width, ctx.height);
     const kfScript = ctx.writeFilterScript(kfFilter);
-    const kfTmp = outFile.replace(".mp4", "_kf.mp4");
+    const kfTmp = outFile.replace(".mov", "_kf.mov");
     await execFileAsync("ffmpeg", [
       "-y", "-i", outFile,
       "-filter_complex_script", kfScript,
-      ...H264_ARGS,
+      ...ALPHA_ARGS,
       "-an", kfTmp,
     ], FFMPEG_MAX_BUFFER);
     unlinkSync(outFile);
@@ -486,6 +515,169 @@ function resolveClip(segment: any) {
 }
 
 // --- Render pipeline ---
+
+// Extract a flat list of renderable elements from the resolved timeline.
+// Each stack is expanded into its individual layers; non-stacks become single elements.
+function extractElements(timeline: any[]): Array<{
+  seg: any; segmentIndex: number; layerIndex: number;
+  delay: number; opacity: number; crop: boolean;
+}> {
+  const elements: Array<{
+    seg: any; segmentIndex: number; layerIndex: number;
+    delay: number; opacity: number; crop: boolean;
+  }> = [];
+
+  for (let i = 0; i < timeline.length; i++) {
+    const seg = timeline[i];
+    if (seg.type === "stack" && seg.layers && seg.layers.length > 0) {
+      const crop = seg.crop !== false; // default true
+      for (let li = 0; li < seg.layers.length; li++) {
+        const layer = seg.layers[li];
+        const layerSeg = { ...layer } as any;
+        const opacity = layerSeg.opacity != null ? layerSeg.opacity : 1;
+        const delay = layerSeg.delay || 0;
+        delete layerSeg.opacity;
+        delete layerSeg.delay;
+        elements.push({ seg: layerSeg, segmentIndex: i, layerIndex: li, delay, opacity, crop });
+      }
+    } else {
+      // Non-stack: single element on layer 0
+      elements.push({ seg, segmentIndex: i, layerIndex: 0, delay: 0, opacity: 1, crop: true });
+    }
+  }
+  return elements;
+}
+
+// After rendering all elements and probing durations, build the compositing plan.
+function buildCompositingPlan(
+  timeline: any[],
+  elements: Array<{ seg: any; segmentIndex: number; layerIndex: number; delay: number; opacity: number; crop: boolean }>,
+  elementFiles: string[],
+  elementDurations: number[]
+): { plan: Array<{ file: string; absoluteStart: number; duration: number; layer: number; segmentIndex: number; layerIndex: number; opacity: number; contentHash: string }>;
+     segStartTimes: number[]; totalDuration: number; segSlotDurations: number[] } {
+
+  // First, compute each segment's slot duration
+  const segSlotDurations: number[] = [];
+  for (let i = 0; i < timeline.length; i++) {
+    const seg = timeline[i];
+    if (seg.type === "stack" && seg.layers && seg.layers.length > 0) {
+      if (seg.duration && seg.duration > 0) {
+        segSlotDurations.push(seg.duration);
+      } else {
+        // Auto: max of (delay + layer duration) across layers
+        let maxEnd = 0;
+        for (let j = 0; j < elements.length; j++) {
+          if (elements[j].segmentIndex === i) {
+            maxEnd = Math.max(maxEnd, elements[j].delay + elementDurations[j]);
+          }
+        }
+        segSlotDurations.push(maxEnd || 3);
+      }
+    } else {
+      // Non-stack: the element's probed duration
+      const elemIdx = elements.findIndex(e => e.segmentIndex === i);
+      segSlotDurations.push(elemIdx >= 0 ? elementDurations[elemIdx] : 3);
+    }
+  }
+
+  // Compute cumulative segment start times
+  const segStartTimes: number[] = [];
+  let cumTime = 0;
+  for (const d of segSlotDurations) {
+    segStartTimes.push(cumTime);
+    cumTime += d;
+  }
+
+  // Build plan entries
+  const plan: Array<{ file: string; absoluteStart: number; duration: number; layer: number;
+    segmentIndex: number; layerIndex: number; opacity: number; contentHash: string }> = [];
+
+  for (let j = 0; j < elements.length; j++) {
+    const elem = elements[j];
+    const segStart = segStartTimes[elem.segmentIndex];
+    const absStart = Math.max(0, segStart + elem.delay);
+    let duration = elementDurations[j];
+
+    // If cropping is on, clip duration to not exceed the segment slot
+    if (elem.crop) {
+      const maxDur = segSlotDurations[elem.segmentIndex] - elem.delay;
+      if (maxDur > 0) duration = Math.min(duration, maxDur);
+      else continue; // element starts after segment slot ends
+    }
+
+    plan.push({
+      file: elementFiles[j],
+      absoluteStart: absStart,
+      duration,
+      layer: elem.layerIndex,
+      segmentIndex: elem.segmentIndex,
+      layerIndex: elem.layerIndex,
+      opacity: elem.opacity,
+      contentHash: segmentHash(elem.seg),
+    });
+  }
+
+  return { plan, segStartTimes, totalDuration: cumTime, segSlotDurations };
+}
+
+// Detect whether the fast concat path can be used (no overlaps, no multi-layer, no bleed)
+function canUseFastPath(plan: Array<{ layer: number; absoluteStart: number; duration: number }>) {
+  for (const elem of plan) {
+    if (elem.layer !== 0) return false;
+  }
+  const sorted = [...plan].sort((a, b) => a.absoluteStart - b.absoluteStart);
+  for (let i = 1; i < sorted.length; i++) {
+    const prevEnd = sorted[i - 1].absoluteStart + sorted[i - 1].duration;
+    if (sorted[i].absoluteStart < prevEnd - 0.01) return false;
+  }
+  return true;
+}
+
+// Build the FFmpeg filter_complex for global compositing
+function buildGlobalCompositeFilter(
+  plan: Array<{ file: string; absoluteStart: number; duration: number; layer: number; opacity: number }>,
+  totalDuration: number,
+  width: number, height: number, fps: number, bgColor: string
+): string {
+  // Sort by layer (ascending) then start time (ascending)
+  const sorted = [...plan].sort((a, b) => a.layer - b.layer || a.absoluteStart - b.absoluteStart);
+  const inputIndex = (elem: typeof sorted[0]) => plan.indexOf(elem);
+
+  const lines: string[] = [];
+
+  // Base canvas
+  const bg = bgColor.replace("#", "");
+  lines.push(`color=c=0x${bg}:s=${width}x${height}:d=${totalDuration}:r=${fps}[base]`);
+
+  let lastLabel = "base";
+  for (let i = 0; i < sorted.length; i++) {
+    const elem = sorted[i];
+    const idx = inputIndex(elem);
+    const elemLabel = `e${i}`;
+    const outLabel = `out${i}`;
+    const start = elem.absoluteStart;
+    const end = start + elem.duration;
+
+    // Prepare the element: shift PTS so it starts at the right time,
+    // and apply opacity if needed. No tpad — overlay with enable handles timing.
+    const filters: string[] = [];
+    filters.push(`setpts=PTS+${start.toFixed(3)}/TB`);
+    if (elem.opacity < 1) {
+      filters.push("format=yuva420p");
+      filters.push(`colorchannelmixer=aa=${elem.opacity}`);
+    }
+
+    lines.push(`[${idx}:v]${filters.join(",")}[${elemLabel}]`);
+    // overlay with enable: only composite during the element's time window
+    lines.push(`[${lastLabel}][${elemLabel}]overlay=0:0:eof_action=pass:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${outLabel}]`);
+    lastLabel = outLabel;
+  }
+
+  lines.push(`[${lastLabel}]format=yuv420p[final]`);
+  return lines.join(";\n");
+}
+
 let activeRender: { filename: string; progress: number; total: number } | null = null;
 
 app.post("/api/render/:filename", async (req, res) => {
@@ -523,7 +715,7 @@ app.post("/api/render/:filename", async (req, res) => {
   // Build FFmpeg filter complex
   // Strategy: render each segment to a temp file, then concatenate
   const tempFiles = [];
-  const errors = [];
+  const errors: string[] = [];
 
   // Build render context shared by all renderer plugins
   // On Windows, colons in font paths (e.g. C:\Windows\Fonts) can't be reliably escaped
@@ -549,10 +741,30 @@ app.post("/api/render/:filename", async (req, res) => {
     return p;
   }
 
+  // Wrap execFileAsync so FFmpeg calls stream their output to UI slots
+  async function streamingExecFile(cmd: string, args: string[], opts?: any) {
+    if (cmd === "ffmpeg") {
+      const slot = allocSlot();
+      const label = `Element (${args.find((a: string) => a.endsWith(".mov") || a.endsWith(".mp4")) || "ffmpeg"})`.replace(/.*[/\\]/, "").replace(/\.[^.]+$/, "");
+      broadcast({ type: "ffmpeg-slot", slot, label, line: "Starting..." });
+      try {
+        await spawnFFmpeg(args, (line: string) => {
+          broadcast({ type: "ffmpeg-slot", slot, label, line });
+        });
+        broadcast({ type: "ffmpeg-slot", slot, label, line: "Done", done: true });
+        return { stdout: "", stderr: "" };
+      } catch (err) {
+        broadcast({ type: "ffmpeg-slot", slot, label, line: `Error: ${(err as Error).message}`, done: true });
+        throw err;
+      }
+    }
+    return execFileAsync(cmd, args, opts);
+  }
+
   const ctx = {
     width, height, fps, defaultBg: bg, defaultFont,
     buildFadeFilter, resolveClip, readClips, writeFilterScript,
-    LIBRARY_DIR, execFileAsync, existsSync, join,
+    LIBRARY_DIR, execFileAsync: streamingExecFile, existsSync, join,
     rendererRegistry, OUTPUT_DIR, renderCached, broadcast,
   };
 
@@ -561,71 +773,186 @@ app.post("/api/render/:filename", async (req, res) => {
   res.json({ ok: true, output: outputFile });
 
   try {
-    for (let i = 0; i < timeline.length; i++) {
-      const seg = timeline[i];
-      const tempFile = join(OUTPUT_DIR, `_temp_seg_${i}.mp4`);
-      tempFiles.push(tempFile);
+    // --- Phase 1: Extract elements from timeline ---
+    const elements = extractElements(timeline);
 
-      activeRender.progress = i;
-      broadcast({
-        type: "render-progress",
-        segment: i,
-        total: timeline.length,
-        segmentType: seg.type,
-      });
+    // --- Phase 2: Render each element (parallel) ---
+    resetSlots();
+    broadcast({ type: "ffmpeg-slots", count: 0 });
+    broadcast({ type: "render-phase", phase: `Rendering ${elements.length} elements (${PARALLEL_LIMIT} parallel)...` });
+    const elementFiles: string[] = elements.map(
+      (elem) => join(OUTPUT_DIR, `_temp_elem_${elem.segmentIndex}_${elem.layerIndex}.mov`)
+    );
+    tempFiles.push(...elementFiles);
 
+    let completedCount = 0;
+    await parallelMap(elements, async (elem, j) => {
+      const tempFile = elementFiles[j];
       try {
-        const { hit } = await renderCached(seg, tempFile, ctx);
+        const { hit } = await renderCached(elem.seg, tempFile, ctx);
+        completedCount++;
         broadcast({
           type: "render-progress",
-          segment: i,
-          total: timeline.length,
-          segmentType: seg.type,
+          segment: completedCount,
+          total: elements.length,
+          segmentType: elem.seg.type,
           cached: hit,
         });
       } catch (err) {
-        errors.push(`Segment ${i} (${seg.type}): ${(err as Error).message}`);
+        errors.push(`Element ${elem.segmentIndex}/${elem.layerIndex} (${elem.seg.type}): ${(err as Error).message}`);
       }
-    }
+    });
 
     if (errors.length > 0) {
       broadcast({ type: "render-error", errors });
       return;
     }
 
-    // --- Concatenate video (video-only, fast copy) ---
-    broadcast({ type: "render-phase", phase: "Concatenating video..." });
-    const concatList = join(OUTPUT_DIR, "_concat.txt");
-    const concatContent = tempFiles.map((f) => `file '${f.replace(/\\/g, "/")}'`).join("\n");
-    writeFileSync(concatList, concatContent);
-
-    const concatTmp = join(OUTPUT_DIR, "_concat_tmp.mp4");
-    await execFileAsync("ffmpeg", [
-      "-y",
-      "-f", "concat", "-safe", "0",
-      "-i", concatList,
-      "-c", "copy",
-      "-movflags", "+faststart",
-      concatTmp,
-    ], FFMPEG_MAX_BUFFER);
-
-    // --- Global audio mix ---
-    broadcast({ type: "render-phase", phase: "Mixing audio..." });
-    // Probe each segment's duration to compute absolute start times.
-    const segDurations = [];
-    for (const f of tempFiles) {
+    // --- Phase 3: Probe element durations and build compositing plan ---
+    broadcast({ type: "render-phase", phase: "Building compositing plan..." });
+    const elementDurations: number[] = [];
+    for (const f of elementFiles) {
       try {
         const info = await probeJson(execFileAsync, f, "format");
-        segDurations.push(parseFloat(info.format.duration) || 0);
-      } catch { segDurations.push(0); }
+        elementDurations.push(parseFloat(info.format.duration) || 3);
+      } catch { elementDurations.push(3); }
     }
-    const segStartTimes = [];
-    let cumTime = 0;
-    for (const d of segDurations) {
-      segStartTimes.push(cumTime);
-      cumTime += d;
+
+    const { plan, segStartTimes, totalDuration } = buildCompositingPlan(
+      timeline, elements, elementFiles, elementDurations
+    );
+
+    // --- Phase 4: Region-based compositing ---
+    // Split the timeline into regions: "simple" (single element, no overlap) or
+    // "complex" (multiple elements overlapping in time). Composite complex regions
+    // independently (cacheable), then concat all region outputs.
+    broadcast({ type: "render-phase", phase: "Planning compositing regions..." });
+
+    // Sort plan elements by start time
+    const sortedPlan = [...plan].sort((a, b) => a.absoluteStart - b.absoluteStart);
+
+    // Build regions: find time spans where elements overlap or use multiple layers
+    type Region = { start: number; end: number; elements: typeof plan; simple: boolean };
+    const regions: Region[] = [];
+    let ri = 0;
+    while (ri < sortedPlan.length) {
+      const elem = sortedPlan[ri];
+      const regionStart = elem.absoluteStart;
+      let regionEnd = elem.absoluteStart + elem.duration;
+      const regionElems = [elem];
+
+      // Expand region to include any overlapping elements
+      let rj = ri + 1;
+      while (rj < sortedPlan.length) {
+        const next = sortedPlan[rj];
+        if (next.absoluteStart < regionEnd - 0.01) {
+          // Overlaps — absorb into this region
+          regionElems.push(next);
+          regionEnd = Math.max(regionEnd, next.absoluteStart + next.duration);
+          rj++;
+        } else {
+          break;
+        }
+      }
+
+      const simple = regionElems.length === 1 && regionElems[0].layer === 0;
+      regions.push({ start: regionStart, end: regionEnd, elements: regionElems, simple });
+      ri = rj;
     }
-    const totalDuration = cumTime;
+
+    const simpleCount = regions.filter(r => r.simple).length;
+    const complexCount = regions.filter(r => !r.simple).length;
+    broadcast({ type: "render-phase", phase: `${regions.length} regions (${simpleCount} simple, ${complexCount} complex)` });
+
+    // Render each region (parallel)
+    broadcast({ type: "render-phase", phase: `Rendering ${regions.length} regions (${simpleCount} simple, ${complexCount} complex, ${PARALLEL_LIMIT} parallel)...` });
+    resetSlots();
+    broadcast({ type: "ffmpeg-slots", count: 0 }); // clear slots
+    const regionFiles: string[] = new Array(regions.length);
+
+    await parallelMap(regions, async (region, rIdx) => {
+      const regionFile = join(OUTPUT_DIR, `_region_${rIdx}.mp4`);
+      tempFiles.push(regionFile);
+      const slot = allocSlot();
+
+      if (region.simple) {
+        const elem = region.elements[0];
+        const h264Hash = `h264_${elem.contentHash}`;
+        const h264Cache = join(CACHE_DIR, `${h264Hash}.mp4`);
+
+        if (existsSync(h264Cache)) {
+          copyFileSync(h264Cache, regionFile);
+        } else {
+          broadcast({ type: "ffmpeg-slot", slot, label: `Region ${rIdx + 1} (H.264)`, line: "Starting..." });
+          await spawnFFmpeg([
+            "-y", "-i", elem.file,
+            ...H264_ARGS,
+            "-movflags", "+faststart",
+            regionFile,
+          ], (line: string) => broadcast({ type: "ffmpeg-slot", slot, label: `Region ${rIdx + 1}`, line }));
+          broadcast({ type: "ffmpeg-slot", slot, label: `Region ${rIdx + 1}`, line: "Done", done: true });
+          try { copyFileSync(regionFile, h264Cache); } catch {}
+        }
+      } else {
+        const regionHash = deterministicHash({
+          elements: region.elements.map(e => ({
+            contentHash: e.contentHash, start: e.absoluteStart - region.start,
+            duration: e.duration, layer: e.layer, opacity: e.opacity,
+          })),
+          width, height, fps, bg,
+        });
+        const regionCache = join(CACHE_DIR, `region_${regionHash}.mp4`);
+
+        if (existsSync(regionCache)) {
+          broadcast({ type: "render-phase", phase: `Region ${rIdx + 1}: [cached]` });
+          copyFileSync(regionCache, regionFile);
+        } else {
+          broadcast({ type: "ffmpeg-slot", slot, label: `Region ${rIdx + 1} (composite)`, line: `${region.elements.length} elements, ${(region.end - region.start).toFixed(1)}s` });
+          const localPlan = region.elements.map(e => ({
+            ...e,
+            absoluteStart: e.absoluteStart - region.start,
+          }));
+          const regionDuration = region.end - region.start;
+          const filter = buildGlobalCompositeFilter(localPlan, regionDuration, width, height, fps, bg);
+          const filterScript = writeFilterScript(filter);
+          const inputs: string[] = [];
+          for (const elem of localPlan) {
+            inputs.push("-i", elem.file);
+          }
+          await spawnFFmpeg([
+            "-y", ...inputs,
+            "-filter_complex_script", filterScript,
+            "-map", "[final]",
+            ...H264_ARGS,
+            "-movflags", "+faststart",
+            "-t", String(regionDuration),
+            regionFile,
+          ], (line: string) => broadcast({ type: "ffmpeg-slot", slot, label: `Region ${rIdx + 1}`, line }));
+          broadcast({ type: "ffmpeg-slot", slot, label: `Region ${rIdx + 1}`, line: "Done", done: true });
+          try {
+            if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
+            copyFileSync(regionFile, regionCache);
+          } catch {}
+        }
+      }
+      regionFiles[rIdx] = regionFile;
+    });
+
+    // Concat all region files
+    broadcast({ type: "render-phase", phase: "Concatenating regions..." });
+    const concatTmp = join(OUTPUT_DIR, "_concat_tmp.mp4");
+    const concatList = join(OUTPUT_DIR, "_concat.txt");
+    const concatContent = regionFiles.map(f => `file '${f.replace(/\\/g, "/")}'`).join("\n");
+    writeFileSync(concatList, concatContent);
+    await execFileAsync("ffmpeg", [
+      "-y", "-f", "concat", "-safe", "0",
+      "-i", concatList, "-c", "copy",
+      "-movflags", "+faststart", concatTmp,
+    ], FFMPEG_MAX_BUFFER);
+    if (existsSync(concatList)) unlinkSync(concatList);
+
+    // --- Phase 5: Audio mix ---
+    broadcast({ type: "render-phase", phase: "Mixing audio..." });
 
     // Collect all audio layers with absolute positioning.
     const audioItems = []; // { path, absoluteStart, volume, loop, temp }
@@ -779,7 +1106,7 @@ app.post("/api/render/:filename", async (req, res) => {
     for (const f of tempFiles) {
       if (existsSync(f)) unlinkSync(f);
     }
-    if (existsSync(concatList)) unlinkSync(concatList);
+    // concatList cleaned up inside the fast-path block
     // Clean up filter script files
     for (let j = 0; j < filterScriptCounter; j++) {
       const p = join(OUTPUT_DIR, `_filter_${j}.txt`);
@@ -801,7 +1128,7 @@ app.get("/api/render/status", (req, res) => {
 // --- Render cache management ---
 app.get("/api/cache", (req, res) => {
   try {
-    const files = listFilesByExt(CACHE_DIR, [".mp4"]);
+    const files = listFilesByExt(CACHE_DIR, [".mov", ".mp4"]);
     const totalSize = files.reduce((sum, f) => sum + statSync(join(CACHE_DIR, f)).size, 0);
     res.json({ entries: files.length, totalSizeMB: (totalSize / 1024 / 1024).toFixed(1) });
   } catch (err) {
@@ -811,7 +1138,7 @@ app.get("/api/cache", (req, res) => {
 
 app.delete("/api/cache", (req, res) => {
   try {
-    const files = listFilesByExt(CACHE_DIR, [".mp4"]);
+    const files = listFilesByExt(CACHE_DIR, [".mov", ".mp4"]);
     for (const f of files) unlinkSync(join(CACHE_DIR, f));
     res.json({ ok: true, cleared: files.length });
   } catch (err) {
