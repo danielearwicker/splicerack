@@ -1570,6 +1570,12 @@ async function renderSequence() {
     div.addEventListener("click", () => {
       $$(".sequence-segment.selected").forEach((s: Element) => s.classList.remove("selected"));
       div.classList.add("selected");
+      // Sync timeline selection
+      $$(".tl-seg.selected").forEach((s: Element) => s.classList.remove("selected"));
+      timelineCanvas.querySelectorAll(`.tl-seg[data-seg-index="${index}"]`).forEach((s: Element) => {
+        s.classList.add("selected");
+        s.scrollIntoView({ inline: "nearest", block: "nearest" });
+      });
       selectYamlSegment(index);
       renderEditorPanel(index);
     });
@@ -1606,6 +1612,247 @@ async function renderSequence() {
     });
 
     sequenceTrack.appendChild(div);
+  });
+
+  renderTimelinePane();
+}
+
+// =====================================================
+// TIMELINE PANE (horizontal time-based view)
+// =====================================================
+
+let pixelsPerSecond = 20;
+const TRACK_HEIGHT = 30;
+const TRACK_PAD = 2;
+
+const timelineCanvas = $("#timeline-canvas")!;
+const timelineViewport = $("#timeline-viewport")!;
+const timelineZoom = $("#timeline-zoom") as HTMLInputElement;
+const timelineZoomValue = $("#timeline-zoom-value")!;
+const timelinePane = $("#timeline-pane")!;
+
+// Get the duration of a resolved segment for timeline layout
+function getSegmentDuration(seg: any): number {
+  if (seg.type === "clip") {
+    const source = seg.source;
+    const clips = clipCache[source] || [];
+    if (seg.clip) {
+      const found = clips.find((c: any) => c.name === seg.clip);
+      if (found) return ((found.end - found.start) / (seg.speed || 1));
+    }
+    if (seg.start != null && seg.end != null) return ((seg.end - seg.start) / (seg.speed || 1));
+    return seg.duration || 5;
+  }
+  if (seg.type === "stack") {
+    if (seg.duration && seg.duration > 0) return seg.duration;
+    const layers = seg.layers || [];
+    if (layers.length === 0) return 3;
+    let maxEnd = 0;
+    const templates = getMergedTemplates();
+    for (const layer of layers) {
+      const resolved = resolveTemplate(layer, templates);
+      const dur = getSegmentDuration(resolved);
+      maxEnd = Math.max(maxEnd, dur + (layer.delay || 0));
+    }
+    return maxEnd || 3;
+  }
+  if (seg.duration != null && seg.duration > 0) return seg.duration;
+  const typeDef = SpliceRack.types[seg.type];
+  if (typeDef) {
+    const durSchema = typeDef.schema.find((s: any) => s.key === "duration");
+    if (durSchema && durSchema.default) return durSchema.default as number;
+  }
+  return 3;
+}
+
+function renderTimelinePane() {
+  timelineCanvas.innerHTML = "";
+
+  if (!projectData || !projectData.timeline || projectData.timeline.length === 0) {
+    timelineCanvas.style.width = "0px";
+    timelineCanvas.style.height = "0px";
+    return;
+  }
+
+  const templates = getMergedTemplates();
+  const resolved = projectData.timeline.map((seg: any) => resolveTemplate(seg, templates));
+
+  // Build boxes: { segIndex, x, width, track, bg, fg, title, duration }
+  const boxes: Array<{
+    segIndex: number; x: number; width: number; track: number;
+    bg: string; fg: string; title: string; duration: number;
+  }> = [];
+  let maxTrack = 0;
+  let cumTime = 0;
+
+  for (let i = 0; i < resolved.length; i++) {
+    const seg = resolved[i];
+    const segDur = getSegmentDuration(seg);
+    const xPx = cumTime * pixelsPerSecond;
+    const wPx = segDur * pixelsPerSecond;
+
+    if (seg.type === "stack") {
+      const layers = seg.layers || [];
+      if (layers.length === 0) {
+        const td = SpliceRack.types["stack"];
+        boxes.push({
+          segIndex: i, x: xPx, width: wPx, track: 0,
+          bg: td?.badgeColor?.bg || "#4a3a6a", fg: td?.badgeColor?.fg || "#c8a0f0",
+          title: "Stack (empty)", duration: segDur,
+        });
+      } else {
+        for (let li = 0; li < layers.length; li++) {
+          const layer = resolveTemplate(layers[li], templates);
+          const layerDelay = layers[li].delay || 0;
+          const layerDur = getSegmentDuration(layer);
+          const layerX = xPx + layerDelay * pixelsPerSecond;
+          const layerW = layerDur * pixelsPerSecond;
+          const td = SpliceRack.types[layer.type];
+          const display = td?.sequenceDisplay?.(layer);
+          boxes.push({
+            segIndex: i, x: layerX, width: layerW, track: li,
+            bg: td?.badgeColor?.bg || "#333", fg: td?.badgeColor?.fg || "#ccc",
+            title: display?.title || layer.type, duration: layerDur,
+          });
+          maxTrack = Math.max(maxTrack, li);
+        }
+      }
+    } else {
+      const td = SpliceRack.types[seg.type];
+      const clipTimes = seg.type === "clip" ? (() => {
+        const clips = clipCache[seg.source] || [];
+        if (seg.clip) { const f = clips.find((c: any) => c.name === seg.clip); if (f) return f; }
+        if (seg.start != null && seg.end != null) return { start: seg.start, end: seg.end };
+        return null;
+      })() : null;
+      const display = td?.sequenceDisplay?.(seg, clipTimes ?? undefined);
+      boxes.push({
+        segIndex: i, x: xPx, width: wPx, track: 0,
+        bg: td?.badgeColor?.bg || "#333", fg: td?.badgeColor?.fg || "#ccc",
+        title: display?.title || seg.type, duration: segDur,
+      });
+    }
+
+    cumTime += segDur;
+  }
+
+  // Set canvas dimensions
+  const totalWidth = Math.max(cumTime * pixelsPerSecond, 100);
+  const numTracks = maxTrack + 1;
+  const canvasHeight = numTracks * TRACK_HEIGHT;
+  timelineCanvas.style.width = totalWidth + "px";
+  timelineCanvas.style.height = canvasHeight + "px";
+
+  // Draw time ruler ticks
+  const tickInterval = pixelsPerSecond >= 30 ? 1 : pixelsPerSecond >= 10 ? 5 : 10;
+  for (let t = 0; t <= cumTime; t += tickInterval) {
+    const xPx = t * pixelsPerSecond;
+    const tick = document.createElement("div");
+    tick.className = "tl-tick";
+    tick.style.left = xPx + "px";
+    timelineCanvas.appendChild(tick);
+
+    const label = document.createElement("div");
+    label.className = "tl-tick-label";
+    label.style.left = (xPx + 2) + "px";
+    const mins = Math.floor(t / 60);
+    const secs = Math.floor(t % 60);
+    label.textContent = mins > 0 ? `${mins}:${String(secs).padStart(2, "0")}` : `${secs}s`;
+    timelineCanvas.appendChild(label);
+  }
+
+  // Render segment boxes
+  for (const box of boxes) {
+    const el = document.createElement("div");
+    el.className = "tl-seg";
+    if (box.segIndex === selectedSegmentIndex) el.classList.add("selected");
+
+    // Track 0 = bottom row
+    const topPx = (maxTrack - box.track) * TRACK_HEIGHT + TRACK_PAD;
+    el.style.left = box.x + "px";
+    el.style.top = topPx + "px";
+    el.style.width = Math.max(box.width, 3) + "px";
+    el.style.height = (TRACK_HEIGHT - TRACK_PAD * 2) + "px";
+    el.style.background = box.bg;
+    el.style.color = box.fg;
+    el.dataset.segIndex = String(box.segIndex);
+
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "tl-title";
+    titleSpan.textContent = box.title;
+    el.appendChild(titleSpan);
+
+    if (box.width > 50) {
+      const durSpan = document.createElement("span");
+      durSpan.className = "tl-dur";
+      durSpan.textContent = box.duration.toFixed(1) + "s";
+      el.appendChild(durSpan);
+    }
+
+    el.addEventListener("click", () => {
+      // Sync selection to sequence list
+      $$(".sequence-segment.selected").forEach((s: Element) => s.classList.remove("selected"));
+      const seqSegs = $$(".sequence-segment");
+      if (seqSegs[box.segIndex]) {
+        seqSegs[box.segIndex].classList.add("selected");
+        seqSegs[box.segIndex].scrollIntoView({ block: "nearest" });
+      }
+      // Sync timeline selection
+      $$(".tl-seg.selected").forEach((s: Element) => s.classList.remove("selected"));
+      timelineCanvas.querySelectorAll(`.tl-seg[data-seg-index="${box.segIndex}"]`).forEach(
+        (s: Element) => s.classList.add("selected")
+      );
+      selectYamlSegment(box.segIndex);
+      renderEditorPanel(box.segIndex);
+    });
+
+    timelineCanvas.appendChild(el);
+  }
+}
+
+// Zoom control
+timelineZoom.addEventListener("input", () => {
+  pixelsPerSecond = parseInt(timelineZoom.value);
+  timelineZoomValue.textContent = pixelsPerSecond + " px/s";
+  renderTimelinePane();
+});
+
+timelineViewport.addEventListener("wheel", (e: WheelEvent) => {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    pixelsPerSecond = Math.max(3, Math.min(150, pixelsPerSecond + (e.deltaY < 0 ? 2 : -2)));
+    timelineZoom.value = String(pixelsPerSecond);
+    timelineZoomValue.textContent = pixelsPerSecond + " px/s";
+    renderTimelinePane();
+  }
+}, { passive: false });
+
+// Resize handle
+{
+  const resizeHandle = $(".timeline-resize-handle")!;
+  let isResizing = false;
+  let startY = 0;
+  let startHeight = 0;
+
+  resizeHandle.addEventListener("mousedown", (e: Event) => {
+    isResizing = true;
+    startY = (e as MouseEvent).clientY;
+    startHeight = timelinePane.offsetHeight;
+    document.body.style.cursor = "ns-resize";
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e: MouseEvent) => {
+    if (!isResizing) return;
+    const delta = startY - e.clientY;
+    (timelinePane as HTMLElement).style.height = Math.max(60, startHeight + delta) + "px";
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (isResizing) {
+      isResizing = false;
+      document.body.style.cursor = "";
+    }
   });
 }
 

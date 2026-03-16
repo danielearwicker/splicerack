@@ -139,6 +139,19 @@
             </div>
           </div>
 
+          <!-- Timeline pane -->
+          <div id="timeline-pane" class="timeline-pane">
+            <div class="timeline-pane-toolbar">
+              <span class="timeline-zoom-label">Timeline</span>
+              <input type="range" id="timeline-zoom" min="3" max="150" value="20" step="1">
+              <span id="timeline-zoom-value">20 px/s</span>
+            </div>
+            <div class="timeline-resize-handle"></div>
+            <div id="timeline-viewport" class="timeline-viewport">
+              <div id="timeline-canvas" class="timeline-canvas"></div>
+            </div>
+          </div>
+
           <!-- Render status -->
           <div id="render-status" class="render-status" style="display:none">
             <div class="render-progress-bar">
