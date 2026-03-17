@@ -1,5 +1,5 @@
 node_modules
-library
 output
 .claude
 cache
+.DS_Store

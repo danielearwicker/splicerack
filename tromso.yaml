@@ -1,0 +1,19 @@
+# SpliceRack Project
+output:
+  width: 1920
+  height: 1080
+  fps: 30
+  background: "#1a1a2e"
+
+timeline:
+  - type: caption
+    text: "Hello World"
+    duration: 3
+    style:
+      font-size: 64
+      color: "#ffffff"
+      background: "#1a1a2e"
+      align: center
+      valign: middle
+    fade-in: 0.5
+    fade-out: 0.5
