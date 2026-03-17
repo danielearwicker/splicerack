@@ -1489,7 +1489,9 @@ function updateSegmentProperty(index: number, key: string, value: any) {
 }
 
 // --- Sequence rendering ---
+let renderSequenceGen = 0;
 async function renderSequence() {
+  const gen = ++renderSequenceGen;
   sequenceTrack.innerHTML = "";
 
   if (!projectData || !projectData.timeline || projectData.timeline.length === 0) {
@@ -1509,6 +1511,9 @@ async function renderSequence() {
       .map((s: any) => s.source as string)
   )];
   await Promise.all(sources.map((s: string) => getClipsForSource(s)));
+
+  // If another renderSequence call started while we were awaiting, bail out
+  if (gen !== renderSequenceGen) return;
 
   let dragSrcIndex: number | null = null;
 

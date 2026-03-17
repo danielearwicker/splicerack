@@ -1,4 +1,3 @@
-# SpliceRack Project
 output:
   width: 1920
   height: 1080
@@ -13,7 +12,11 @@ timeline:
       font-size: 64
       color: "#ffffff"
       background: "#1a1a2e"
-      align: center
-      valign: middle
+      align: "center"
+      valign: "middle"
     fade-in: 0.5
     fade-out: 0.5
+
+  - type: clip
+    source: "02-landing.mov"
+    clip: "landing"
