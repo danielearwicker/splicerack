@@ -160,7 +160,6 @@ export interface SynthesizeParams {
   voice: string;
   rate?: string;
   pitch?: string;
-  volume?: number;
 }
 
 export interface SynthesizeResult {

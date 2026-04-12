@@ -121,6 +121,18 @@ header h1 {
   overflow-y: auto;
 }
 
+.viewer-panel .panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.video-info {
+  font-size: 12px;
+  color: #8ab4f8;
+  font-weight: normal;
+}
+
 .video-container {
   background: #000;
   display: flex;
@@ -154,9 +166,44 @@ header h1 {
   color: #a0a0b0;
 }
 
-.scrubber-row input[type="range"] {
+.scrubber-wrap {
   flex: 1;
+  position: relative;
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.scrubber-wrap input[type="range"] {
+  width: 100%;
+  position: relative;
+  z-index: 2;
   accent-color: #e94560;
+}
+
+.scrubber-region {
+  position: absolute;
+  top: 4px;
+  height: 12px;
+  background: rgba(138, 180, 248, 0.25);
+  border-radius: 2px;
+  z-index: 1;
+  pointer-events: none;
+  display: none;
+}
+
+.scrubber-mark {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 20px;
+  background: #81c995;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.scrubber-mark-out {
+  background: #e94560;
 }
 
 .step-buttons-row {
@@ -261,6 +308,11 @@ header h1 {
 
 .clips-list li:hover {
   background: #1a3a5e;
+}
+
+.clips-list li.active {
+  background: #1a3a5e;
+  border-color: #8ab4f8;
 }
 
 .clips-list .clip-name {

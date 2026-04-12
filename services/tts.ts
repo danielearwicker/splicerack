@@ -59,8 +59,8 @@ export async function getVoices(): Promise<Voice[]> {
   return voicesCache;
 }
 
-export async function synthesize({ text, voice, rate, pitch, volume }: SynthesizeParams): Promise<SynthesizeResult> {
-  const settings = { text, voice, rate: rate || "0%", pitch: pitch || "0%", volume: volume || 1 };
+export async function synthesize({ text, voice, rate, pitch }: SynthesizeParams): Promise<SynthesizeResult> {
+  const settings = { text, voice, rate: rate || "0%", pitch: pitch || "0%" };
   const hash = deterministicHash(settings);
   const cachedPath = join(CACHE_DIR, `${hash}.mp3`);
 

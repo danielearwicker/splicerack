@@ -1,6 +1,6 @@
 SpliceRack.registerType("image", {
   schema: [
-    { key: "source", label: "Source", type: "file", default: "" },
+    { key: "source", label: "Source", type: "file", default: "", accept: [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"] },
     { key: "duration", label: "Duration", type: "number", default: 5, min: 0.1, max: 300, step: 0.1 },
     { key: "animation.type", label: "Animation", type: "dropdown", default: "none", options: ["none", "ken-burns", "zoom", "pan"], group: "Animation" },
     { key: "animation.from.x", label: "From X", type: "number", default: 0, step: 1, group: "Animation", condition: (seg) => { const a = seg.animation as Record<string, unknown> | undefined; return !!a && !!a.type && a.type !== "none"; } },

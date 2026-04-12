@@ -17,7 +17,7 @@ import { buildFadeFilter, buildKeyframeFilter } from "./types/_helpers.ts";
 import { getVoices, synthesize } from "./services/tts.ts";
 import { deterministicHash } from "./shared/hash.ts";
 import { deepMerge } from "./shared/deep-merge.ts";
-import { H264_ARGS, ALPHA_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, probeJson, spawnFFmpeg } from "./shared/ffmpeg.ts";
+import { H264_ARGS, ALPHA_ARGS, FFMPEG_MAX_BUFFER, hexToFFmpeg, probeJson, spawnFFmpeg, FFMPEG_PATH, FFPROBE_PATH } from "./shared/ffmpeg.ts";
 import { loadYamlFile, listFilesByExt } from "./shared/yaml-utils.ts";
 import tsBlankSpace from "ts-blank-space";
 
@@ -216,7 +216,7 @@ app.get("/api/thumbnail/:filename", async (req, res) => {
   }
   try {
     const { stdout } = await execFileAsync(
-      "ffmpeg",
+      FFMPEG_PATH,
       [
         "-ss", String(time),
         "-i", filePath,
@@ -244,7 +244,7 @@ app.get("/api/frame/:filename", async (req, res) => {
   }
   try {
     const { stdout } = await execFileAsync(
-      "ffmpeg",
+      FFMPEG_PATH,
       [
         "-ss", String(time),
         "-i", filePath,
@@ -310,14 +310,34 @@ if (!existsSync(CACHE_DIR)) {
 // Content-addressable render cache: hash segment settings → cached .mov (alpha-capable)
 function segmentHash(seg: any) {
   // Include modification times of referenced library files so edits invalidate cache.
+  // Collect file refs from the segment itself AND from nested layers (e.g. stack segments).
+  const fileRefs: string[] = [seg.file, seg.source].filter(Boolean);
+  if (Array.isArray(seg.layers)) {
+    for (const layer of seg.layers) {
+      if (layer.file) fileRefs.push(layer.file);
+      if (layer.source) fileRefs.push(layer.source);
+    }
+  }
   let fileMeta = "";
-  for (const f of [seg.file, seg.source].filter(Boolean)) {
+  for (const f of fileRefs) {
     try {
       const p = join(LIBRARY_DIR, f);
-      if (existsSync(p)) fileMeta += `|${f}:${statSync(p).mtimeMs}`;
-    } catch {}
+      if (existsSync(p)) {
+        const mtime = statSync(p).mtimeMs;
+        fileMeta += `|${f}:${mtime}`;
+        console.log(`[hash] file=${f} mtime=${mtime}`);
+      } else {
+        console.log(`[hash] file=${f} NOT FOUND at ${p}`);
+      }
+    } catch (err) {
+      console.log(`[hash] file=${f} ERROR: ${(err as Error).message}`);
+    }
   }
-  return deterministicHash(seg, { excludeKeys: ["audio"], suffix: fileMeta });
+  const hash = deterministicHash(seg, { excludeKeys: ["audio"], suffix: fileMeta });
+  if (seg.file || seg.type === "html") {
+    console.log(`[hash] type=${seg.type} file=${seg.file} hash=${hash} fileMeta=${fileMeta}`);
+  }
+  return hash;
 }
 
 function getCachePath(hash: string) {
@@ -337,7 +357,7 @@ async function resolveAudioLayer(layer: any, seg: any, ctx: any) {
     const { start, end } = ctx.resolveClip(seg);
     const audioFile = join(ctx.OUTPUT_DIR, `_audio_source_${Date.now()}.wav`);
     const vol = layer.volume != null ? layer.volume : 1;
-    await ctx.execFileAsync("ffmpeg", [
+    await ctx.execFileAsync(FFMPEG_PATH, [
       "-y", "-ss", String(start), "-to", String(end),
       "-i", sourcePath,
       "-vn", "-af", `volume=${vol}`,
@@ -394,7 +414,7 @@ async function renderCached(seg: any, outFile: string, ctx: any) {
     const kfFilter = buildKeyframeFilter(seg.keyframes, ctx.fps, srcW, srcH, ctx.width, ctx.height);
     const kfScript = ctx.writeFilterScript(kfFilter);
     const kfTmp = outFile.replace(".mov", "_kf.mov");
-    await execFileAsync("ffmpeg", [
+    await execFileAsync(FFMPEG_PATH, [
       "-y", "-i", outFile,
       "-filter_complex_script", kfScript,
       ...ALPHA_ARGS,
@@ -530,7 +550,7 @@ function extractElements(timeline: any[]): Array<{
   for (let i = 0; i < timeline.length; i++) {
     const seg = timeline[i];
     if (seg.type === "stack" && seg.layers && seg.layers.length > 0) {
-      const crop = seg.crop !== false; // default true
+      const crop = seg.crop !== false && seg.crop !== "false"; // default true
       for (let li = 0; li < seg.layers.length; li++) {
         const layer = seg.layers[li];
         const layerSeg = { ...layer } as any;
@@ -741,11 +761,21 @@ app.post("/api/render/:filename", async (req, res) => {
     return p;
   }
 
-  // Wrap execFileAsync so FFmpeg calls stream their output to UI slots
+  // Wrap execFileAsync so FFmpeg/FFprobe calls use the npm binary paths
+  // and FFmpeg calls stream their stderr output to UI slots.
   async function streamingExecFile(cmd: string, args: string[], opts?: any) {
-    if (cmd === "ffmpeg") {
+    // Substitute binary paths from npm packages
+    // Resolve binary paths — accept both string name and full path
+    const isFFmpeg = cmd === "ffmpeg" || cmd === FFMPEG_PATH;
+    const isFFprobe = cmd === "ffprobe" || cmd === FFPROBE_PATH;
+    const resolvedCmd = isFFmpeg ? FFMPEG_PATH
+                      : isFFprobe ? FFPROBE_PATH
+                      : cmd;
+
+    if (isFFmpeg) {
       const slot = allocSlot();
-      const label = `Element (${args.find((a: string) => a.endsWith(".mov") || a.endsWith(".mp4")) || "ffmpeg"})`.replace(/.*[/\\]/, "").replace(/\.[^.]+$/, "");
+      const outFile = args.find((a: string) => a.endsWith(".mov") || a.endsWith(".mp4")) || "ffmpeg";
+      const label = `${outFile.replace(/.*[/\\]/, "").replace(/\.[^.]+$/, "")}`;
       broadcast({ type: "ffmpeg-slot", slot, label, line: "Starting..." });
       try {
         await spawnFFmpeg(args, (line: string) => {
@@ -758,7 +788,7 @@ app.post("/api/render/:filename", async (req, res) => {
         throw err;
       }
     }
-    return execFileAsync(cmd, args, opts);
+    return execFileAsync(resolvedCmd, args, opts);
   }
 
   const ctx = {
@@ -944,7 +974,7 @@ app.post("/api/render/:filename", async (req, res) => {
     const concatList = join(OUTPUT_DIR, "_concat.txt");
     const concatContent = regionFiles.map(f => `file '${f.replace(/\\/g, "/")}'`).join("\n");
     writeFileSync(concatList, concatContent);
-    await execFileAsync("ffmpeg", [
+    await execFileAsync(FFMPEG_PATH, [
       "-y", "-f", "concat", "-safe", "0",
       "-i", concatList, "-c", "copy",
       "-movflags", "+faststart", concatTmp,
@@ -1076,7 +1106,7 @@ app.post("/api/render/:filename", async (req, res) => {
       mixFilters.push(`${labels}amix=inputs=${audioItems.length + 1}:duration=longest:normalize=0[mixed]`);
 
       const mixFilterScript = writeFilterScript(mixFilters.join(";\n"));
-      await execFileAsync("ffmpeg", [
+      await execFileAsync(FFMPEG_PATH, [
         "-y",
         ...mixInputs,
         "-filter_complex_script", mixFilterScript,

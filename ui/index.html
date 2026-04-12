@@ -40,6 +40,8 @@
         <div class="panel viewer-panel">
           <div class="panel-header">
             <h2 id="viewer-title">Select a video</h2>
+            <span id="video-info" class="video-info"></span>
+            <button id="btn-use-format" class="toolbar-btn" style="display:none" title="Set current project's output format to match this video">Use for output</button>
           </div>
           <div class="video-container">
             <video id="video-player" controls preload="metadata"></video>
@@ -47,7 +49,12 @@
           <div id="clip-controls" class="clip-controls" style="display:none">
             <div class="scrubber-row">
               <span id="current-time">0:00.000</span>
-              <input type="range" id="scrubber" min="0" max="1000" value="0" step="1">
+              <div class="scrubber-wrap">
+                <div id="scrubber-region" class="scrubber-region"></div>
+                <div id="scrubber-mark-in" class="scrubber-mark" style="display:none"></div>
+                <div id="scrubber-mark-out" class="scrubber-mark scrubber-mark-out" style="display:none"></div>
+                <input type="range" id="scrubber" min="0" max="1000" value="0" step="1">
+              </div>
               <span id="duration">0:00.000</span>
             </div>
             <div class="step-buttons-row">

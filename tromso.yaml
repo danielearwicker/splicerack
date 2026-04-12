@@ -5,18 +5,99 @@ output:
   background: "#1a1a2e"
 
 timeline:
-  - type: caption
-    text: "Hello World"
-    duration: 3
-    style:
-      font-size: 64
-      color: "#ffffff"
-      background: "#1a1a2e"
-      align: "center"
-      valign: "middle"
-    fade-in: 0.5
-    fade-out: 0.5
+  - type: stack
+    layers:
+      - type: "clip"
+        speed: 1
+        fade-in: 1
+        fade-out: 0
+        source: "01-flight.mov"
+        clip: "flight"
+      - type: "html"
+        file: "tromso-title.html"
+        duration: 5
+        opacity: 0.95
+        delay: 0.5
+
+  - type: stack
+    duration: 5
+    crop: true
+    layers:
+      - type: image
+        source: "map.png"
+        duration: 5
+        fade-in: 0.5
+        fade-out: 0.5
+      - type: html
+        file: "walk-animation.html"
+        duration: 3
+        delay: 1
+    audio:
+      - type: narrator
+        text: "The island of Tromsøya stretches about ten and a half kilometres from north to south — roughly a two and a half hour walk."
+        delay: 0.5
 
   - type: clip
     source: "02-landing.mov"
     clip: "landing"
+
+  - type: clip
+    source: "03-airbnb.mov"
+    clip: "airbnb"
+
+  - type: clip
+    source: "04-town.mov"
+    clip: "birds"
+
+  - type: clip
+    source: "06-dogs.mov"
+    clip: "two dogs"
+
+  - type: clip
+    source: "06-dogs.mov"
+    clip: "lone dog"
+
+  - type: clip
+    source: "05-town.mov"
+    clip: "mountains"
+
+  - type: clip
+    source: "07-harbour.mov"
+    clip: "harbour 1"
+
+  - type: clip
+    source: "07-harbour.mov"
+    clip: "harbour 2"
+
+  - type: clip
+    source: "07-harbour.mov"
+    clip: "harbour 3"
+
+  - type: clip
+    source: "07-harbour.mov"
+    clip: "harbour 4"
+
+  - type: clip
+    source: "07-harbour.mov"
+    clip: "harbour 5"
+
+  - type: clip
+    source: "08-bridge.mov"
+    clip: "bridge from ground"
+
+  - type: clip
+    source: "09-bridge.mov"
+    clip: "bridge crossing"
+
+  - type: clip
+    source: "10-cablecar.mov"
+    clip: "cable car ride"
+
+  - type: clip
+    source: "11-view.mov"
+    clip: "panorama"
+
+  - type: clip
+    source: "12-plane.mov"
+    clip: "home"
+    fade-out: 2

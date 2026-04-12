@@ -1,6 +1,6 @@
 SpliceRack.registerType("clip", {
   schema: [
-    { key: "source", label: "Source", type: "file", default: "" },
+    { key: "source", label: "Source", type: "file", default: "", accept: [".mp4", ".mov", ".avi", ".mkv", ".webm"] },
     { key: "clip", label: "Clip", type: "clip-dropdown", default: "" },
     { key: "start", label: "Start", type: "number", default: 0, min: 0, step: 0.001, condition: (seg) => !seg.clip },
     { key: "end", label: "End", type: "number", default: 10, min: 0, step: 0.001, condition: (seg) => !seg.clip },

@@ -287,12 +287,37 @@ function selectVideo(filename: string) {
   markInDisplay.textContent = "--:--.---";
   markOutDisplay.textContent = "--:--.---";
   clipNameInput.value = "";
+  updateScrubberMarks();
 
   viewerTitle.textContent = filename;
   video.src = `/library/${encodeURIComponent(filename)}`;
   video.load();
   clipControls.style.display = "";
   clipsSection.style.display = "";
+
+  // Probe video metadata and display info
+  const videoInfoEl = $("#video-info")!;
+  const useFormatBtn = $("#btn-use-format") as HTMLElement;
+  videoInfoEl.textContent = "";
+  useFormatBtn.style.display = "none";
+  (window as any)._currentVideoMeta = null;
+
+  fetch(`/api/probe/${encodeURIComponent(filename)}`)
+    .then(r => r.json())
+    .then(data => {
+      const vs = data.streams?.find((s: any) => s.codec_type === "video");
+      if (vs) {
+        const w = vs.width;
+        const h = vs.height;
+        const fpsRaw = vs.r_frame_rate || vs.avg_frame_rate || "";
+        const fpsParts = fpsRaw.split("/");
+        const fps = fpsParts.length === 2 ? Math.round(parseInt(fpsParts[0]) / parseInt(fpsParts[1])) : parseInt(fpsRaw) || 0;
+        videoInfoEl.textContent = `${w}x${h} @ ${fps}fps`;
+        (window as any)._currentVideoMeta = { width: w, height: h, fps };
+        useFormatBtn.style.display = "";
+      }
+    })
+    .catch(() => {});
 
   for (const li of libraryList.children) {
     li.classList.toggle("active", li.textContent === filename);
@@ -325,16 +350,71 @@ for (const btn of $$(".step-btn")) {
   });
 }
 
-// --- Clip marking ---
-$("#btn-mark-in")!.addEventListener("click", () => {
-  markIn = video.currentTime;
-  markInDisplay.textContent = formatTime(markIn);
+// --- Use video format for output ---
+$("#btn-use-format")!.addEventListener("click", () => {
+  const meta = (window as any)._currentVideoMeta;
+  if (!meta) return;
+  if (!projectData) return alert("Open a project first (in the Sequence tab)");
+  if (!projectData.output) projectData.output = {};
+  projectData.output.width = meta.width;
+  projectData.output.height = meta.height;
+  projectData.output.fps = meta.fps;
+  syncYamlFromData();
+  addLog("info", `Output format set to ${meta.width}x${meta.height} @ ${meta.fps}fps`);
+  alert(`Output set to ${meta.width}x${meta.height} @ ${meta.fps}fps`);
 });
 
-$("#btn-mark-out")!.addEventListener("click", () => {
-  markOut = video.currentTime;
+// --- Clip marking ---
+const scrubberRegion = $("#scrubber-region") as HTMLElement;
+const scrubberMarkIn = $("#scrubber-mark-in") as HTMLElement;
+const scrubberMarkOut = $("#scrubber-mark-out") as HTMLElement;
+
+function updateScrubberMarks() {
+  const dur = video.duration || 1;
+  const wrap = $(".scrubber-wrap") as HTMLElement;
+  const wrapWidth = wrap.offsetWidth;
+
+  if (markIn != null) {
+    const pct = (markIn / dur) * 100;
+    scrubberMarkIn.style.display = "";
+    scrubberMarkIn.style.left = `${pct}%`;
+  } else {
+    scrubberMarkIn.style.display = "none";
+  }
+
+  if (markOut != null) {
+    const pct = (markOut / dur) * 100;
+    scrubberMarkOut.style.display = "";
+    scrubberMarkOut.style.left = `${pct}%`;
+  } else {
+    scrubberMarkOut.style.display = "none";
+  }
+
+  if (markIn != null && markOut != null && markOut > markIn) {
+    const leftPct = (markIn / dur) * 100;
+    const widthPct = ((markOut - markIn) / dur) * 100;
+    scrubberRegion.style.display = "";
+    scrubberRegion.style.left = `${leftPct}%`;
+    scrubberRegion.style.width = `${widthPct}%`;
+  } else {
+    scrubberRegion.style.display = "none";
+  }
+}
+
+function setMarkIn(time: number) {
+  markIn = time;
+  markInDisplay.textContent = formatTime(markIn);
+  updateScrubberMarks();
+}
+
+function setMarkOut(time: number) {
+  markOut = time;
   markOutDisplay.textContent = formatTime(markOut);
-});
+  updateScrubberMarks();
+}
+
+$("#btn-mark-in")!.addEventListener("click", () => setMarkIn(video.currentTime));
+$("#btn-mark-out")!.addEventListener("click", () => setMarkOut(video.currentTime));
 
 $("#btn-save-clip")!.addEventListener("click", () => {
   const name = clipNameInput.value.trim();
@@ -427,6 +507,22 @@ function renderClips() {
 
     actions.appendChild(playBtn);
     actions.appendChild(deleteBtn);
+    // Click the row to load clip times into the editor
+    li.style.cursor = "pointer";
+    li.addEventListener("click", (e: Event) => {
+      // Don't trigger when clicking buttons
+      if ((e.target as HTMLElement).tagName === "BUTTON") return;
+      setMarkIn(clip.start);
+      setMarkOut(clip.end);
+      clipNameInput.value = clip.name;
+      video.currentTime = clip.start;
+      // Highlight the active clip
+      for (const child of clipsList.children) {
+        (child as HTMLElement).classList.remove("active");
+      }
+      li.classList.add("active");
+    });
+
     li.appendChild(nameSpan);
     li.appendChild(timesSpan);
     li.appendChild(actions);

@@ -1,5 +1,11 @@
 // Shared FFmpeg constants and utilities used by server.ts and type plugins.
 
+import { spawn } from "child_process";
+
+/** FFmpeg and FFprobe binary names — expected to be on PATH. */
+export const FFMPEG_PATH = "ffmpeg";
+export const FFPROBE_PATH = "ffprobe";
+
 /** Standard H.264 encoding arguments used across all segment renderers. */
 export const H264_ARGS = ["-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p"] as const;
 
@@ -33,8 +39,6 @@ export function scalePadFilter(width: number, height: number): string {
   return `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`;
 }
 
-import { spawn } from "child_process";
-
 /**
  * Spawn an FFmpeg process and stream its stderr output line by line via a callback.
  * Returns a promise that resolves when the process completes.
@@ -44,7 +48,7 @@ export function spawnFFmpeg(
   onStderr: (line: string) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const proc = spawn("ffmpeg", args, { stdio: ["pipe", "pipe", "pipe"] });
+    const proc = spawn(FFMPEG_PATH, args, { stdio: ["pipe", "pipe", "pipe"] });
     let errBuf = "";
     proc.stderr.on("data", (chunk: Buffer) => {
       errBuf += chunk.toString();
@@ -75,6 +79,6 @@ export async function probeJson(
   else if (show === "streams") args.push("-show_streams");
   else { args.push("-show_format", "-show_streams"); }
   args.push(filePath);
-  const { stdout } = await execFileAsync("ffprobe", args);
+  const { stdout } = await execFileAsync(FFPROBE_PATH, args);
   return JSON.parse(stdout as string);
 }

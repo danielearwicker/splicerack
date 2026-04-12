@@ -5,7 +5,7 @@ A YAML-driven video composition system. Define your video as segments in YAML �
 ## Features
 
 - **YAML orchestration** — define your video structure declaratively
-- **Segment types** — captions, video clips, images, pauses, and composited stacks
+- **Segment types** — captions, video clips, HTML animations, images, pauses, and composited stacks
 - **Templates** — reusable configurations for segments and audio, with property overrides
 - **Audio system** — per-segment audio layers (native clip audio, TTS, audio files) mixed globally with overlap support
 - **Text-to-speech** — Azure Speech integration with automatic caching
@@ -17,7 +17,7 @@ A YAML-driven video composition system. Define your video as segments in YAML �
 
 ```bash
 npm install
-node server.js
+npm start
 ```
 
 Open http://localhost:3344.
@@ -27,6 +27,14 @@ Open http://localhost:3344.
 - Node.js 18+
 - FFmpeg and FFprobe on PATH
 - (Optional) Azure Speech credentials for TTS — set `AZURE_SPEECH_KEY` and `AZURE_SPEECH_ENDPOINT`
+
+#### Linux Only
+
+Puppeteer prerequisites for HTML animation rendering:
+
+```
+sudo apt-get update && sudo apt-get install -y libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 libatspi2.0-0
+```
 
 ## How It Works
 
@@ -80,19 +88,27 @@ timeline:
 ## Project Structure
 
 ```
-server.js                 # Express server, render pipeline, API
+server.ts                 # Express server, render pipeline, API
+shared/                   # Extracted modules
+  types.ts                #   TypeScript interfaces
+  ffmpeg.ts               #   FFmpeg path resolution and helpers
+  hash.ts                 #   Deterministic hashing
+  deep-merge.ts           #   Deep merge utility
+  yaml-utils.ts           #   YAML helpers
 types/                    # Segment type plugins (auto-discovered)
-  caption/                #   server.js (renderer) + ui.js (schema/UI) + ui.css
+  caption/                #   server.ts (renderer) + ui.ts (schema/UI) + ui.css
   clip/
+  html/                   #   HTML/CSS animation via headless browser
   image/
   pause/
   stack/                  #   compositor — layers multiple segments
 services/
-  tts.js                  # Azure Speech TTS with caching
+  tts.ts                  # Azure Speech TTS with caching
+  html-renderer.ts        # Puppeteer-based frame capture for HTML segments
 ui/
   index.html              # Single-page app
-  app.js                  # UI logic
-  type-registry.js        # Client-side type registration
+  app.ts                  # UI logic
+  type-registry.ts        # Client-side type registration
   style.css
 docs/                     # Documentation
 library/                  # Media files (created at runtime)
@@ -109,8 +125,9 @@ See [docs/README.md](docs/README.md) for full documentation covering:
 - [Render pipeline](docs/render-pipeline.md)
 - [Caching](docs/caching.md)
 - [Audio system](docs/audio.md)
-- [Segment types](docs/README.md#segment-types) (caption, clip, image, pause, stack)
+- [Segment types](docs/README.md#segment-types) (caption, clip, html, image, pause, stack)
 - [Audio layer types](docs/README.md#audio-layer-types) (source, tts, file)
 - [API reference](docs/api.md)
+- [Keyframe animation](docs/keyframes.md)
 - [Adding new types](docs/adding-types.md)
 - [Environment variables](docs/environment.md)

@@ -3,6 +3,7 @@ import { join } from "path";
 import { mkdirSync, existsSync, unlinkSync, readdirSync } from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { FFMPEG_PATH } from "../shared/ffmpeg.ts";
 import { ALPHA_ARGS } from "../shared/ffmpeg.ts";
 
 const execFileAsync = promisify(execFile);
@@ -59,11 +60,16 @@ export async function renderHtmlToVideo({ html, width, height, fps, duration, ou
       const timeMs = frame * frameDuration;
 
       // Set all animations to the target time
-      await (page as any).evaluate((t: number) => {
+      await (page as any).evaluate((t: number, dur: number) => {
+        // Seek all CSS animations
         (document as any).getAnimations({ subtree: true }).forEach((anim: Animation) => {
           anim.currentTime = t;
         });
-      }, timeMs);
+        // Dispatch a custom event so the page can update JS-driven content
+        window.dispatchEvent(new CustomEvent("splicerack-frame", {
+          detail: { timeMs: t, progress: t / dur, duration: dur }
+        }));
+      }, timeMs, duration * 1000);
 
       // Small delay to let the browser paint
       await page.evaluate(() => new Promise((r) => requestAnimationFrame(r)));
@@ -76,7 +82,7 @@ export async function renderHtmlToVideo({ html, width, height, fps, duration, ou
   }
 
   // Stitch frames into alpha-capable video with FFmpeg (PNG codec for transparency)
-  await execFileAsync("ffmpeg", [
+  await execFileAsync(FFMPEG_PATH, [
     "-y",
     "-framerate", String(fps),
     "-i", join(framesDir, "frame_%06d.png"),
