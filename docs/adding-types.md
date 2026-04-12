@@ -7,22 +7,24 @@ Segment types are self-contained plugins. Each type is a directory under `types/
 ```
 types/
   my-type/
-    server.js    # Required: rendering logic
-    ui.js        # Required: UI definition
+    server.ts    # Required: rendering logic
+    ui.ts        # Required: UI definition
     ui.css       # Optional: badge color and styles
 ```
 
-## server.js
+## server.ts
 
-Export a default object with `type` and `render()`:
+Export a default object with `type` and `render()`. Use the `SegmentRenderer` type from `shared/types.ts`:
 
-```javascript
+```typescript
+import type { SegmentRenderer, RenderContext, Segment } from "../../shared/types.ts";
+
 export default {
   type: "my-type",
 
-  async render(seg, outFile, ctx) {
+  async render(seg: Segment, outFile: string, ctx: RenderContext): Promise<void> {
     // seg: the resolved segment object from the YAML
-    // outFile: path to write the output .mp4
+    // outFile: path to write the output .mov (alpha-capable)
     // ctx: render context with helpers
 
     await ctx.execFileAsync("ffmpeg", [
@@ -31,7 +33,7 @@ export default {
       outFile,
     ], { maxBuffer: 50 * 1024 * 1024 });
   },
-};
+} satisfies SegmentRenderer;
 ```
 
 ### Render Context (`ctx`)
@@ -47,16 +49,17 @@ export default {
 | `writeFilterScript(filter)` | Writes filter to a temp file, returns path |
 | `LIBRARY_DIR` | Path to the library directory |
 | `OUTPUT_DIR` | Path to the output directory |
-| `execFileAsync` | Promisified `child_process.execFile` |
+| `execFileAsync` | Promisified `child_process.execFile` (auto-resolves `"ffmpeg"`/`"ffprobe"` to correct binary paths) |
 | `existsSync`, `join` | Node.js fs/path helpers |
 | `rendererRegistry` | Map of type name to renderer (for stack-like composition) |
 | `renderCached(seg, outFile, ctx)` | Render a segment with caching |
+| `broadcast(msg)` | Send a WebSocket event to all connected clients |
 
-## ui.js
+## ui.ts
 
-Register the type with the client-side type registry:
+Register the type with the client-side type registry. TypeScript is stripped to JS at serve-time via `ts-blank-space`, so you can use type annotations:
 
-```javascript
+```typescript
 SpliceRack.registerType("my-type", {
   schema: [
     { key: "text", label: "Text", type: "string", default: "Hello" },
@@ -80,12 +83,6 @@ SpliceRack.registerType("my-type", {
       detail: `${seg.duration || 3}s`,
     };
   },
-
-  serialize(seg, lines) {
-    // Append YAML lines for this segment's properties
-    if (seg.text) lines.push(`    text: "${seg.text}"`);
-    if (seg.duration) lines.push(`    duration: ${seg.duration}`);
-  },
 });
 ```
 
@@ -97,11 +94,13 @@ SpliceRack.registerType("my-type", {
 | `number` | Numeric input (supports `min`, `max`, `step`) |
 | `color` | Color picker + hex text input |
 | `dropdown` | Select. Requires `options: ["a", "b", "c"]` |
-| `file` | Dropdown of library video files |
+| `file` | Dropdown of library files. Supports `accept: [".mp4", ".html"]` to filter by extension |
 | `clip-dropdown` | Dropdown of clips for the segment's source video |
+| `voice-dropdown` | Dropdown of Azure Speech voices (populated from API) |
+| `audio-file` | Dropdown of audio files from the library |
 | `layers` | Layer list editor (used by stack) |
 
-Fields support `condition: (seg) => boolean` to conditionally show/hide.
+Fields support `condition: (seg) => boolean` to conditionally show/hide, and `group: "name"` to visually group related fields.
 
 ## ui.css
 
@@ -113,4 +112,4 @@ Optional. Define the badge color for the sequence:
 
 ## Auto-Discovery
 
-The server discovers types by scanning `types/*/server.js` at startup. The UI loads all `types/*/ui.js` and `types/*/ui.css` via the `/api/types.js` and `/api/types.css` bundle endpoints. No registration in a central file is needed.
+The server discovers types by scanning `types/*/server.ts` at startup via `types/index.ts`. The UI loads all `types/*/ui.ts` and `types/*/ui.css` via the `/api/types.js` and `/api/types.css` bundle endpoints (TypeScript is stripped to JS at serve-time). No registration in a central file is needed.

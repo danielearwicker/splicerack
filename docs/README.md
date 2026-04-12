@@ -17,13 +17,14 @@ Each segment type occupies a slot in the sequence and renders to a video clip.
 
 - [Caption](types/caption.md) — text on a solid background
 - [Clip](types/clip.md) — a time range from a library video
+- [HTML](types/html.md) — HTML/CSS animation rendered via headless browser
 - [Image](types/image.md) — a still image with optional animation
 - [Pause](types/pause.md) — a solid-color gap
 - [Stack](types/stack.md) — composite multiple layers with opacity and delay
 
 ## Audio Layer Types
 
-Audio layers attach to segments and are mixed globally after video concatenation.
+Audio layers attach to segments and are mixed globally after video compositing.
 
 - [Source](audio/source.md) — native audio from a clip's video file
 - [TTS](audio/tts.md) — text-to-speech via Azure Speech

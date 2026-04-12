@@ -18,9 +18,9 @@ Displays a still image with optional animation (Ken Burns effect).
 
 The `ken-burns`, `zoom`, and `pan` types animate between `from` and `to` states over the duration. Each state has:
 
-- `x` — horizontal position (0 = left, 0.5 = center, 1 = right)
-- `y` — vertical position (0 = top, 0.5 = center, 1 = bottom)
-- `scale` — zoom level (1 = fill, 1.5 = 150%, etc.)
+- `x` — horizontal pixel offset for the `zoompan` filter
+- `y` — vertical pixel offset for the `zoompan` filter
+- `scale` — zoom level (1 = fill, 1.2 = 120%, etc.)
 
 ```yaml
 - type: image
@@ -28,8 +28,8 @@ The `ken-burns`, `zoom`, and `pan` types animate between `from` and `to` states 
   duration: 6
   animation:
     type: ken-burns
-    from: { x: 0.3, y: 0.3, scale: 1.2 }
-    to: { x: 0.7, y: 0.5, scale: 1.5 }
+    from: { x: 0, y: 0, scale: 1.0 }
+    to: { x: 100, y: 50, scale: 1.5 }
   fade-in: 1
   fade-out: 1
 ```

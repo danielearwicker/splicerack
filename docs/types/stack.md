@@ -8,6 +8,7 @@ Composites multiple segment layers on top of each other with per-layer opacity a
 |----------|------|---------|-------------|
 | `duration` | number | 0 (auto) | Total duration. 0 = derived from longest layer + delay |
 | `background` | color | "#1a1a2e" | Base canvas color |
+| `crop` | boolean | true | Whether to clip layer durations to the segment slot duration |
 | `layers` | array | — | Ordered list of layer objects (bottom to top) |
 
 ## Layer Properties

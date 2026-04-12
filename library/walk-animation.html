@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: {{width}}px;
+    height: {{height}}px;
+    background: transparent;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .walker {
+    position: absolute;
+    font-size: 48px;
+    transform: translate(-50%, -90%) scaleX(-1);
+    animation: walk {{duration}}s linear both;
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,0.9));
+    z-index: 2;
+  }
+
+  .counter {
+    position: absolute;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    color: #FFD700;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.95), 0 0 12px rgba(0,0,0,0.6);
+    transform: translate(25px, -85%);
+    animation: walk {{duration}}s linear both;
+    white-space: nowrap;
+    z-index: 2;
+  }
+
+  /*
+    Map coordinates (source image 1606x1021, output {{width}}x{{height}}):
+    The image will be scaled to fit and centered.
+    For 1920x1080: scale=1.058, x-offset=111
+    Line start (north tip, source ~909,38) → (1072, 40)
+    Line end (south tip, source ~571,927) → (715, 980)
+  */
+  @keyframes walk {
+    0%   { left: 1072px; top: 40px; }
+    100% { left: 715px; top: 980px; }
+  }
+</style>
+</head>
+<body>
+  <div class="walker">🚶</div>
+  <div class="counter" id="counter">0.0 km</div>
+
+  <script>
+    const counter = document.getElementById('counter');
+    const totalDist = 10.6;
+    window.addEventListener('splicerack-frame', (e) => {
+      const progress = e.detail.progress;
+      const dist = (totalDist * Math.min(progress, 1)).toFixed(1);
+      counter.textContent = dist + ' km';
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: {{width}}px;
+    height: {{height}}px;
+    background: {{background}};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    perspective: 1200px;
+  }
+
+  .logo {
+    display: flex;
+    gap: 0;
+    transform-style: preserve-3d;
+  }
+
+  .letter {
+    font-family: 'Segoe UI', 'Arial Black', sans-serif;
+    font-size: 160px;
+    font-weight: 800;
+    color: #e94560;
+    display: inline-block;
+    animation: flyOut {{duration}}s cubic-bezier(0.55, 0.055, 0.675, 0.19) both;
+    transform-origin: center center;
+  }
+
+  /* Each letter gets a unique delay and ending transform — reverse of intro */
+  .letter:nth-child(1)  { animation-delay: 0.0s;  --endX: -900px; --endY: -600px; --rotX: 720deg; --rotY: -540deg; --rotZ: 360deg; }
+  .letter:nth-child(2)  { animation-delay: 0.08s; --endX: 800px;  --endY: -500px; --rotX: -540deg; --rotY: 720deg; --rotZ: -270deg; }
+  .letter:nth-child(3)  { animation-delay: 0.16s; --endX: -700px; --endY: 600px;  --rotX: 360deg; --rotY: -720deg; --rotZ: 540deg; }
+  .letter:nth-child(4)  { animation-delay: 0.12s; --endX: 1000px; --endY: 400px;  --rotX: -720deg; --rotY: 360deg; --rotZ: -360deg; }
+  .letter:nth-child(5)  { animation-delay: 0.2s;  --endX: -600px; --endY: -800px; --rotX: 540deg; --rotY: -360deg; --rotZ: 720deg; }
+  .letter:nth-child(6)  { animation-delay: 0.04s; --endX: 900px;  --endY: 500px;  --rotX: -360deg; --rotY: 540deg; --rotZ: -540deg; }
+  .letter:nth-child(7)  { animation-delay: 0.24s; --endX: -800px; --endY: 700px;  --rotX: 720deg; --rotY: 360deg; --rotZ: -720deg; }
+  .letter:nth-child(8)  { animation-delay: 0.1s;  --endX: 700px;  --endY: -700px; --rotX: -540deg; --rotY: -720deg; --rotZ: 360deg; }
+  .letter:nth-child(9)  { animation-delay: 0.18s; --endX: -1000px; --endY: 300px; --rotX: 360deg; --rotY: 540deg; --rotZ: -540deg; }
+  .letter:nth-child(10) { animation-delay: 0.06s; --endX: 600px;  --endY: -400px; --rotX: -720deg; --rotY: -360deg; --rotZ: 720deg; }
+
+  @keyframes flyOut {
+    0% {
+      transform: translate3d(0, 0, 0) rotateX(0) rotateY(0) rotateZ(0);
+      opacity: 1;
+    }
+    85% {
+      opacity: 1;
+    }
+    100% {
+      transform: translate3d(var(--endX), var(--endY), -800px)
+                 rotateX(var(--rotX)) rotateY(var(--rotY)) rotateZ(var(--rotZ));
+      opacity: 0;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="logo">
+    <span class="letter">S</span>
+    <span class="letter">p</span>
+    <span class="letter">l</span>
+    <span class="letter">i</span>
+    <span class="letter">c</span>
+    <span class="letter">e</span>
+    <span class="letter">R</span>
+    <span class="letter">a</span>
+    <span class="letter">c</span>
+    <span class="letter">k</span>
+  </div>
+</body>
+</html>

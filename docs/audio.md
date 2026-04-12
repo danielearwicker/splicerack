@@ -32,15 +32,15 @@ Each audio layer's start time is: **segment start time + delay**
 
 | Type | Description | Key Properties |
 |------|-------------|----------------|
-| `source` | Native audio from a clip's video file | `volume`, `mute` |
-| `tts` | Azure Speech synthesis | `text`, `voice`, `volume`, `delay` |
-| `file` | Audio file from library | `source`, `volume`, `delay`, `loop` |
+| `source` | Native audio from a clip's video file | `volume`, `delay`, `mute` |
+| `tts` | Azure Speech synthesis | `text`, `voice`, `volume`, `delay`, `mute` |
+| `file` | Audio file from library | `source`, `volume`, `delay`, `loop`, `mute` |
 
 See individual docs: [Source](audio/source.md), [TTS](audio/tts.md), [File](audio/file.md)
 
 ### Templates
 
-Audio layers support templates. Define a template with an audio-related `type` (tts, file, source), then reference it by name:
+Audio layers support templates — both inline project templates and external templates from the `templates/` directory. Define a template with an audio-related `type` (tts, file, source), then reference it by name:
 
 ```yaml
 templates:
@@ -72,7 +72,7 @@ output:
 
 ## How Mixing Works
 
-After video concatenation, all audio layers (per-segment + background) are collected with absolute timestamps. FFmpeg's `amix` filter mixes them into a single track:
+After video compositing and concatenation, all audio layers (per-segment + background) are collected with absolute timestamps. FFmpeg's `amix` filter mixes them into a single track:
 
 1. Each layer gets `adelay` for its absolute start time (milliseconds)
 2. Each layer gets `volume` scaling

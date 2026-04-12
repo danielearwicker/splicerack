@@ -7,6 +7,7 @@ Extracts the native audio track from a clip segment's source video file.
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `volume` | number | 1 | Volume multiplier (0 = silent, 1 = original, 2 = doubled) |
+| `delay` | number | 0 | Seconds to offset from segment start (can be negative) |
 | `mute` | boolean | false | Mute this layer entirely |
 
 ## Availability

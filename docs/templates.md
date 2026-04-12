@@ -52,13 +52,38 @@ Audio templates work identically. If an audio layer's `type` isn't a built-in au
         text: "Welcome"      # override — template provides voice and volume
 ```
 
+## External Templates
+
+Templates can also be stored as individual YAML files in the `templates/` directory (one template per file, named `{template-name}.yaml`). These are managed via the Templates API or the UI.
+
+External templates are merged with inline project templates — inline definitions override external ones if they share the same name.
+
+```yaml
+# templates/narrator.yaml
+type: tts
+voice: en-GB-RyanNeural
+volume: 0.9
+```
+
+This template can be referenced the same way as an inline template — `type: narrator` in an audio layer.
+
+### API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/templates` | List all external templates |
+| `GET` | `/api/template/:name` | Get a single template |
+| `PUT` | `/api/template/:name` | Create or update |
+| `DELETE` | `/api/template/:name` | Delete |
+
 ## Resolution
 
 Templates are resolved via deep merge:
 
-1. Start with the template's properties as the base
-2. Overlay the segment/layer's own properties on top
-3. For nested objects, merge recursively (segment values win)
-4. The template's `type` determines which renderer is used
+1. External templates (from `templates/` directory) and inline templates (from the project's `templates` section) are combined, with inline overriding external
+2. Start with the template's properties as the base
+3. Overlay the segment/layer's own properties on top
+4. For nested objects, merge recursively (segment values win)
+5. The template's `type` determines which renderer is used
 
 This means you can override any individual property without losing the rest of the template.

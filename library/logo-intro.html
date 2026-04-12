@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: {{width}}px;
+    height: {{height}}px;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    perspective: 1200px;
+  }
+
+  .logo {
+    display: flex;
+    gap: 0;
+    transform-style: preserve-3d;
+  }
+
+  .letter {
+    font-family: 'Segoe UI', 'Arial Black', sans-serif;
+    font-size: 160px;
+    font-weight: 800;
+    color: #e94560;
+    display: inline-block;
+    animation: flyIn {{duration}}s cubic-bezier(0.23, 1, 0.32, 1) both;
+    transform-origin: center center;
+  }
+
+  /* Each letter gets a unique delay and starting transform */
+  .letter:nth-child(1)  { animation-delay: 0.0s;  --startX: -900px; --startY: -600px; --rotX: 720deg; --rotY: -540deg; --rotZ: 360deg; }
+  .letter:nth-child(2)  { animation-delay: 0.08s; --startX: 800px;  --startY: -500px; --rotX: -540deg; --rotY: 720deg; --rotZ: -270deg; }
+  .letter:nth-child(3)  { animation-delay: 0.16s; --startX: -700px; --startY: 600px;  --rotX: 360deg; --rotY: -720deg; --rotZ: 540deg; }
+  .letter:nth-child(4)  { animation-delay: 0.12s; --startX: 1000px; --startY: 400px;  --rotX: -720deg; --rotY: 360deg; --rotZ: -360deg; }
+  .letter:nth-child(5)  { animation-delay: 0.2s;  --startX: -600px; --startY: -800px; --rotX: 540deg; --rotY: -360deg; --rotZ: 720deg; }
+  .letter:nth-child(6)  { animation-delay: 0.04s; --startX: 900px;  --startY: 500px;  --rotX: -360deg; --rotY: 540deg; --rotZ: -540deg; }
+  .letter:nth-child(7)  { animation-delay: 0.24s; --startX: -800px; --startY: 700px;  --rotX: 720deg; --rotY: 360deg; --rotZ: -720deg; }
+  .letter:nth-child(8)  { animation-delay: 0.1s;  --startX: 700px;  --startY: -700px; --rotX: -540deg; --rotY: -720deg; --rotZ: 360deg; }
+  .letter:nth-child(9)  { animation-delay: 0.18s; --startX: -1000px; --startY: 300px; --rotX: 360deg; --rotY: 540deg; --rotZ: -540deg; }
+  .letter:nth-child(10) { animation-delay: 0.06s; --startX: 600px;  --startY: -400px; --rotX: -720deg; --rotY: -360deg; --rotZ: 720deg; }
+
+  @keyframes flyIn {
+    0% {
+      transform: translate3d(var(--startX), var(--startY), -800px)
+                 rotateX(var(--rotX)) rotateY(var(--rotY)) rotateZ(var(--rotZ));
+      opacity: 0;
+    }
+    15% {
+      opacity: 1;
+    }
+    100% {
+      transform: translate3d(0, 0, 0) rotateX(0) rotateY(0) rotateZ(0);
+      opacity: 1;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="logo">
+    <span class="letter">S</span>
+    <span class="letter">p</span>
+    <span class="letter">l</span>
+    <span class="letter">i</span>
+    <span class="letter">c</span>
+    <span class="letter">e</span>
+    <span class="letter">R</span>
+    <span class="letter">a</span>
+    <span class="letter">c</span>
+    <span class="letter">k</span>
+  </div>
+</body>
+</html>

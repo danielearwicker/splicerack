@@ -32,6 +32,10 @@ Renders text on a solid-color background.
   fade-out: 1
 ```
 
+## Transparent Background
+
+The background supports transparency. Set `style.background` to `"transparent"`, an `rgba(...)` value, or an 8-character hex with alpha (e.g. `"#1a1a2e80"`) to render the caption on a transparent canvas. This is useful when using captions as layers in a stack.
+
 ## Rendering
 
-Uses FFmpeg's `drawtext` filter with the system font. Text positioning is calculated from the align/valign settings. Filter scripts are written to files to avoid font path escaping issues on Windows.
+Uses FFmpeg's `drawtext` filter with the system font. Text positioning is calculated from the align/valign settings. Filter scripts are written to files to avoid font path escaping issues on Windows. When a transparent background is specified, a transparent canvas (`black@0`) is used instead of a solid color.

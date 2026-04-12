@@ -12,6 +12,7 @@ Text-to-speech synthesis using Azure Cognitive Services Speech.
 | `delay` | number | 0 | Seconds to offset from segment start (can be negative) |
 | `rate` | string | "0%" | Speech rate adjustment |
 | `pitch` | string | "0%" | Pitch adjustment |
+| `mute` | boolean | false | Mute this layer entirely |
 
 ## Setup
 
@@ -59,7 +60,7 @@ The UI populates a voice dropdown from the Azure API. Available voices depend on
 
 ## Caching
 
-TTS results are cached in `cache/tts/` by a hash of `{ text, voice, rate, pitch, volume }`. Identical synthesis requests are served from cache instantly.
+TTS results are cached in `cache/tts/` by a hash of `{ text, voice, rate, pitch }`. Volume is applied during the audio mix, not at synthesis time, so changing volume doesn't re-synthesize. Identical synthesis requests are served from cache instantly.
 
 ## Timing
 

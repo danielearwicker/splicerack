@@ -19,7 +19,7 @@ output:
 
 ## Templates
 
-Reusable configurations for segments or audio layers. See [Templates](templates.md).
+Reusable configurations for segments or audio layers. Templates can be defined inline in the project or as external YAML files in the `templates/` directory. See [Templates](templates.md).
 
 ```yaml
 templates:
@@ -75,3 +75,7 @@ Any segment can have an `audio` array. Audio layers are positioned by their segm
 ```
 
 See [Audio System](audio.md) for details.
+
+## Keyframes
+
+Any segment can have a `keyframes` array that animates zoom and pan over the segment's duration. See [Keyframe Animation](keyframes.md) for details.

@@ -10,6 +10,7 @@ Plays an audio file from the library.
 | `volume` | number | 1 | Volume multiplier (0-2) |
 | `delay` | number | 0 | Seconds to offset from segment start (can be negative) |
 | `loop` | boolean | false | Loop audio to fill the video duration |
+| `mute` | boolean | false | Mute this layer entirely |
 
 ## Supported Formats
 
