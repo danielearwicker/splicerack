@@ -3,7 +3,7 @@ import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import multer from "multer";
 import { cpus } from "os";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync, watch } from "fs";
 import { join, basename, extname } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
@@ -476,6 +476,8 @@ app.put("/api/project/:filename", (req, res) => {
   } else {
     return res.status(400).json({ error: "Provide raw or parsed" });
   }
+  recentApiSaves.add(filename);
+  setTimeout(() => recentApiSaves.delete(filename), 1000);
   writeFileSync(filePath, content);
   broadcast({ type: "project-updated", filename });
   res.json({ ok: true });
@@ -1232,6 +1234,9 @@ app.put("/api/template/:name", (req, res) => {
   const filePath = join(TEMPLATES_DIR, `${name}.yaml`);
   try {
     const content = req.body.raw || yaml.dump(req.body.parsed, { lineWidth: -1 });
+    const templateFile = `${name}.yaml`;
+    recentApiSaves.add(templateFile);
+    setTimeout(() => recentApiSaves.delete(templateFile), 1000);
     writeFileSync(filePath, content);
     broadcast({ type: "templates-updated" });
     res.json({ ok: true });
@@ -1245,6 +1250,9 @@ app.delete("/api/template/:name", (req, res) => {
   const filePath = join(TEMPLATES_DIR, `${name}.yaml`);
   if (!existsSync(filePath)) return res.status(404).json({ error: "Template not found" });
   try {
+    const templateFile = `${name}.yaml`;
+    recentApiSaves.add(templateFile);
+    setTimeout(() => recentApiSaves.delete(templateFile), 1000);
     unlinkSync(filePath);
     broadcast({ type: "templates-updated" });
     res.json({ ok: true });
@@ -1314,6 +1322,40 @@ function broadcast(msg: object) {
     }
   }
 }
+
+// --- File watching for external changes ---
+const recentApiSaves = new Set<string>();
+const watchDebounce = new Map<string, ReturnType<typeof setTimeout>>();
+
+function watchYamlDir(dir: string, handler: (filename: string) => void) {
+  if (!existsSync(dir)) return;
+  try {
+    watch(dir, (event, rawName) => {
+      if (!rawName || typeof rawName !== "string") return;
+      const filename = rawName.replace(/\\/g, "/");
+      if (!filename.endsWith(".yaml") && !filename.endsWith(".yml")) return;
+
+      // Debounce — fs.watch often fires multiple times per write
+      const existing = watchDebounce.get(filename);
+      if (existing) clearTimeout(existing);
+      watchDebounce.set(filename, setTimeout(() => {
+        watchDebounce.delete(filename);
+        if (recentApiSaves.has(filename)) return; // ignore our own saves
+        handler(filename);
+      }, 250));
+    });
+  } catch {
+    // watch not supported or dir inaccessible — silently ignore
+  }
+}
+
+watchYamlDir(PROJECT_DIR, (filename) => {
+  broadcast({ type: "project-file-changed", filename });
+});
+
+watchYamlDir(TEMPLATES_DIR, (filename) => {
+  broadcast({ type: "templates-updated" });
+});
 
 // SPA fallback — serve index.html for any unmatched route
 app.get("*", (req, res) => {

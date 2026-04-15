@@ -2334,6 +2334,11 @@ function connectWS() {
       if (projectData) renderSequence();
     } else if (msg.type === "project-updated") {
       loadProjects();
+    } else if (msg.type === "project-file-changed") {
+      loadProjects();
+      if (msg.filename === currentProject) {
+        loadProject(msg.filename);
+      }
     } else if (msg.type === "render-started") {
       renderStatus.style.display = "";
       renderStatusText.textContent = "Rendering...";
