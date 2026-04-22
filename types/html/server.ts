@@ -44,6 +44,10 @@ export default {
       duration,
       outFile,
       tempDir: ctx.OUTPUT_DIR,
+      baseDir: ctx.LIBRARY_DIR,
+      onProgress: (msg) => {
+        ctx.broadcast({ type: "render-phase", phase: `HTML: ${msg.phase}` });
+      },
     });
   },
 } satisfies SegmentRenderer;

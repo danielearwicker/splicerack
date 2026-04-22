@@ -1,8 +1,9 @@
 import puppeteer from "puppeteer";
 import { join } from "path";
-import { mkdirSync, existsSync, unlinkSync, readdirSync } from "fs";
+import { mkdirSync, existsSync, unlinkSync, readdirSync, writeFileSync } from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { pathToFileURL } from "url";
 import { FFMPEG_PATH } from "../shared/ffmpeg.ts";
 import { ALPHA_ARGS } from "../shared/ffmpeg.ts";
 
@@ -16,19 +17,25 @@ interface RenderHtmlToVideoOptions {
   duration: number;
   outFile: string;
   tempDir: string;
+  baseDir?: string;
+  onProgress?: (msg: { phase: string; frame?: number; totalFrames?: number }) => void;
 }
 
 /**
  * Render an HTML/CSS animation to an MP4 video file.
  */
-export async function renderHtmlToVideo({ html, width, height, fps, duration, outFile, tempDir }: RenderHtmlToVideoOptions): Promise<void> {
+export async function renderHtmlToVideo({ html, width, height, fps, duration, outFile, tempDir, baseDir, onProgress }: RenderHtmlToVideoOptions): Promise<void> {
   const framesDir = join(tempDir, `_html_frames_${Date.now()}`);
   if (!existsSync(framesDir)) mkdirSync(framesDir, { recursive: true });
 
   const totalFrames = Math.ceil(duration * fps);
   const frameDuration = 1000 / fps; // ms per frame
 
+  const report = onProgress || (() => {});
+  report({ phase: `Launching browser (${totalFrames} frames to capture)` });
+
   let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
+  let tempHtmlFile: string | undefined;
   try {
     browser = await puppeteer.launch({
       headless: true,
@@ -53,11 +60,24 @@ export async function renderHtmlToVideo({ html, width, height, fps, duration, ou
       </style></head>`
     );
 
-    await page.setContent(wrappedHtml, { waitUntil: "load" });
+    report({ phase: "Loading HTML content" });
+    if (baseDir) {
+      // Write to a temp file in baseDir so relative URLs (images, fonts) resolve naturally
+      tempHtmlFile = join(baseDir, `_splicerack_render_${Date.now()}.html`);
+      writeFileSync(tempHtmlFile, wrappedHtml, "utf-8");
+      await page.goto(pathToFileURL(tempHtmlFile).href, { waitUntil: "load" });
+    } else {
+      await page.setContent(wrappedHtml, { waitUntil: "load" });
+    }
 
     // Capture each frame by seeking the animation
     for (let frame = 0; frame < totalFrames; frame++) {
       const timeMs = frame * frameDuration;
+
+      if (frame % 10 === 0) {
+        const pct = Math.round((frame / totalFrames) * 100);
+        report({ phase: `Capturing frame ${frame + 1}/${totalFrames} (${pct}%)`, frame: frame + 1, totalFrames });
+      }
 
       // Set all animations to the target time
       await (page as any).evaluate((t: number, dur: number) => {
@@ -77,11 +97,15 @@ export async function renderHtmlToVideo({ html, width, height, fps, duration, ou
       const framePath = join(framesDir, `frame_${String(frame).padStart(6, "0")}.png`);
       await page.screenshot({ path: framePath, type: "png", omitBackground: true });
     }
+
+    report({ phase: `All ${totalFrames} frames captured` });
   } finally {
     if (browser) await browser.close();
+    if (tempHtmlFile) try { unlinkSync(tempHtmlFile); } catch {}
   }
 
   // Stitch frames into alpha-capable video with FFmpeg (PNG codec for transparency)
+  report({ phase: "Stitching frames into video with FFmpeg" });
   await execFileAsync(FFMPEG_PATH, [
     "-y",
     "-framerate", String(fps),

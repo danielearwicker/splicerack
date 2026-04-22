@@ -1447,6 +1447,7 @@ const AUDIO_LAYER_SCHEMAS: Record<string, any[]> = {
     { key: "source", label: "File", type: "audio-file", default: "" },
     { key: "volume", label: "Volume", type: "number", default: 1, min: 0, max: 2, step: 0.1 },
     { key: "delay", label: "Delay (s)", type: "number", default: 0, step: 0.1 },
+    { key: "start", label: "Start (s)", type: "number", default: 0, min: 0, step: 0.1 },
     { key: "loop", label: "Loop", type: "dropdown", default: "false", options: ["false", "true"] },
   ],
 };

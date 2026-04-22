@@ -378,6 +378,19 @@ async function resolveAudioLayer(layer: any, seg: any, ctx: any) {
   } else if (layer.type === "file") {
     const filePath = join(ctx.LIBRARY_DIR, layer.source);
     if (!existsSync(filePath)) throw new Error(`Audio file not found: ${layer.source}`);
+    // If a start offset is specified, extract audio from that point onwards
+    if (layer.start && layer.start > 0) {
+      const trimmedFile = join(ctx.OUTPUT_DIR, `_audio_file_${Date.now()}.wav`);
+      const vol = layer.volume != null ? layer.volume : 1;
+      await ctx.execFileAsync(FFMPEG_PATH, [
+        "-y", "-ss", String(layer.start),
+        "-i", filePath,
+        "-vn", "-af", `volume=${vol}`,
+        "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+        trimmedFile,
+      ], FFMPEG_MAX_BUFFER);
+      return { path: trimmedFile, delay: layer.delay || 0, volume: 1, loop: layer.loop, temp: true };
+    }
     return { path: filePath, delay: layer.delay || 0, volume: layer.volume, loop: layer.loop, temp: false };
   }
 

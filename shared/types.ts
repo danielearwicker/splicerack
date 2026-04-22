@@ -62,6 +62,7 @@ export interface AudioLayerDef {
   pitch?: string;
   source?: string;
   loop?: boolean;
+  start?: number;
 }
 
 export interface ResolvedAudioItem {
